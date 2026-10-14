@@ -6,24 +6,24 @@
 const STORE_KEY = "trellite.pro.v2";
 
 const LABEL_COLORS = [
-  "#61bd4f", "#f2d600", "#ff9f1a", "#eb5a46", "#c377e0", "#0079bf",
-  "#00c2e0", "#51e898", "#ff78cb", "#344563", "#b3bac5", "#026aa7",
+  "#5a9e6f", "#cf9a46", "#cf8a4e", "#c15f5b", "#8d6fae", "#4c6793",
+  "#4f9aa3", "#6fa58d", "#b07f99", "#5b6b8c", "#8a93a1", "#3f5e79",
 ];
-const AVATAR_COLORS = ["#0079bf", "#eb5a46", "#61bd4f", "#f2d600", "#c377e0", "#ff9f1a", "#00c2e0", "#ff78cb"];
+const AVATAR_COLORS = ["#4c6793", "#c15f5b", "#5a9e6f", "#cf9a46", "#8d6fae", "#cf8a4e", "#4f9aa3", "#b07f99"];
 
 const BOARD_BGS = [
-  { type: "color", value: "#0079bf" },
-  { type: "color", value: "#d29034" },
-  { type: "color", value: "#519839" },
-  { type: "color", value: "#b04632" },
-  { type: "color", value: "#89609e" },
-  { type: "color", value: "#cd5a91" },
-  { type: "color", value: "#4bbf6b" },
-  { type: "color", value: "#00aecc" },
-  { type: "gradient", value: "linear-gradient(135deg,#0079bf,#5067c5)" },
-  { type: "gradient", value: "linear-gradient(135deg,#e34f74,#f6a192)" },
-  { type: "gradient", value: "linear-gradient(135deg,#2d7a46,#9ad1a8)" },
-  { type: "gradient", value: "linear-gradient(135deg,#654ea3,#eaafc8)" },
+  { type: "color", value: "#3d4f6d" },
+  { type: "color", value: "#44607a" },
+  { type: "color", value: "#3f5e54" },
+  { type: "color", value: "#6d5a4a" },
+  { type: "color", value: "#5a4e6d" },
+  { type: "color", value: "#6d4a52" },
+  { type: "color", value: "#2f3b47" },
+  { type: "color", value: "#4a5a6a" },
+  { type: "gradient", value: "linear-gradient(135deg,#334155,#475569)" },
+  { type: "gradient", value: "linear-gradient(135deg,#3d4f6d,#56688c)" },
+  { type: "gradient", value: "linear-gradient(135deg,#3f5e54,#5a7d6f)" },
+  { type: "gradient", value: "linear-gradient(135deg,#4a4e69,#6b6f8c)" },
 ];
 
 const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-3);
@@ -99,8 +99,8 @@ function seed() {
   const tomas = { id: uid(), name: "Tomáš Procházka", color: AVATAR_COLORS[5] };
   const members = [me, petra, jan, eva, tomas];
 
-  const LBL = [["Design", "#c377e0"], ["Chyba", "#eb5a46"], ["Urgentní", "#ff9f1a"],
-    ["Funkce", "#0079bf"], ["Průzkum", "#00c2e0"], ["Hotovo", "#61bd4f"]];
+  const LBL = [["Design", "#8d6fae"], ["Chyba", "#c15f5b"], ["Urgentní", "#cf8a4e"],
+    ["Funkce", "#4c6793"], ["Průzkum", "#4f9aa3"], ["Hotovo", "#5a9e6f"]];
   function labelSet() {
     const arr = LBL.map(([name, color]) => ({ id: uid(), name, color }));
     const by = {}; LBL.forEach(([n], i) => by[n] = arr[i].id);
@@ -133,7 +133,7 @@ function seed() {
       ]),
       list("Design", [
         card("Redesign onboardingu", { labels: [L.by["Design"], L.by["Urgentní"]], members: [me.id, jan.id],
-          due: { date: days(2), done: false }, cover: { type: "color", value: "#c377e0" },
+          due: { date: days(2), done: false }, cover: { type: "color", value: "#8d6fae" },
           desc: "Nový tříkrokový onboarding pro nové uživatele.",
           checklists: [cl("Úkoly", [["Drátěné modely", true], ["Hi-fi návrhy", false], ["Předání vývoji", false]])] }),
         card("Audit design systému", { labels: [L.by["Design"]], members: [jan.id] }),
@@ -171,7 +171,7 @@ function seed() {
         card("Schválení rozpočtu", { labels: [L.by["Urgentní"]], due: { date: days(1), done: false } }),
       ]),
       list("Probíhá", [
-        card("Texty pro landing page", { labels: [L.by["Design"]], members: [tomas.id], cover: { type: "color", value: "#0079bf" } }),
+        card("Texty pro landing page", { labels: [L.by["Design"]], members: [tomas.id], cover: { type: "color", value: "#4c6793" } }),
       ]),
       list("Zveřejněno", [
         card("Kalendář příspěvků na sítě", { labels: [L.by["Hotovo"]], due: { date: days(-2), done: true } }),
@@ -219,7 +219,7 @@ function seed() {
       ]),
       list("Probíhá", [
         card("Sestavit knihovnu komponent", { labels: [L.by["Funkce"]], members: [me.id],
-          cover: { type: "color", value: "#519839" }, comments: [cm(me.id, "Tlačítka a vstupy hotové.", 8)] }),
+          cover: { type: "color", value: "#3f5e54" }, comments: [cm(me.id, "Tlačítka a vstupy hotové.", 8)] }),
       ]),
       list("Hotovo", [
         card("Zahájení projektu", { labels: [L.by["Hotovo"]], due: { date: days(-10), done: true } }),
