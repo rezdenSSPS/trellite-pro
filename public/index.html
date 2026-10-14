@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="cs" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Trellite Pro</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-left">
+      <button id="homeBtn" class="icon-btn" title="Nástěnky" aria-label="Nástěnky">⌂</button>
+      <span class="logo">Trellite<span class="logo-pro">Pro</span></span>
+      <span id="syncDot" class="sync-dot" title="Stav připojení"></span>
+    </div>
+    <div class="topbar-center">
+      <span id="boardStar" class="board-star" title="Přidat k oblíbeným" hidden>☆</span>
+      <span id="boardTitle" class="board-title" contenteditable="false"></span>
+    </div>
+    <div class="topbar-right">
+      <input id="searchInput" class="search" type="search" placeholder="Hledat karty…" hidden />
+      <button id="filterBtn" class="pill-btn" hidden>⚲ Filtr</button>
+      <button id="themeBtn" class="icon-btn" title="Přepnout tmavý režim" aria-label="Přepnout tmavý režim">◐</button>
+      <button id="menuBtn" class="icon-btn" title="Menu nástěnky" aria-label="Menu nástěnky" hidden>⋯</button>
+    </div>
+  </header>
+
+  <!-- Přehled nástěnek -->
+  <main id="boardsView" class="boards-view">
+    <section id="starredSection" hidden>
+      <h2 class="section-title">★ Oblíbené nástěnky</h2>
+      <div id="starredGrid" class="boards-grid"></div>
+    </section>
+    <h2 class="section-title">Vaše nástěnky</h2>
+    <div id="boardsGrid" class="boards-grid"></div>
+    <button id="resetSampleBtn" class="reset-sample">↺ Obnovit ukázková data</button>
+  </main>
+
+  <!-- Jedna nástěnka -->
+  <main id="boardView" class="board-view" hidden>
+    <div id="lists" class="lists"></div>
+    <button id="addListBtn" class="add-list-btn">+ Přidat seznam</button>
+  </main>
+
+  <!-- Detail karty -->
+  <div id="modalOverlay" class="modal-overlay" hidden>
+    <div class="modal" role="dialog" aria-modal="true">
+      <div id="modalCover" class="modal-cover" hidden></div>
+      <button id="modalClose" class="modal-close" aria-label="Zavřít">×</button>
+      <div class="modal-grid">
+        <div class="modal-main">
+          <input id="cardTitleInput" class="card-title-input" />
+          <div class="modal-meta" id="cardListName"></div>
+          <div id="cardQuickRow" class="card-quick-row"></div>
+          <div id="modalBody"></div>
+        </div>
+        <aside class="modal-side" id="modalSide"></aside>
+      </div>
+    </div>
+  </div>
+
+  <!-- Boční menu nástěnky -->
+  <div id="drawerOverlay" class="drawer-overlay" hidden>
+    <aside class="drawer" role="dialog" aria-modal="true">
+      <div class="drawer-header">
+        <span id="drawerTitle">Menu</span>
+        <button id="drawerBack" class="drawer-back" hidden>‹ Zpět</button>
+        <button id="drawerClose" class="modal-close" aria-label="Zavřít">×</button>
+      </div>
+      <div id="drawerBody" class="drawer-body"></div>
+    </aside>
+  </div>
+
+  <!-- Vyskakovací okno -->
+  <div id="popover" class="popover" hidden></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
