@@ -52,53 +52,87 @@
   </div>
 
   <div id="appWrap" hidden>
+  <div class="app-shell">
+  <!-- Postranní panel -->
+  <aside class="sidebar">
+    <div class="side-logo"><span class="logo-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><rect x="4" y="4" width="6" height="14" rx="1.5"/><rect x="14" y="4" width="6" height="9" rx="1.5"/></svg></span><span>Trellite</span><span class="logo-pro">PRO</span></div>
+    <nav class="side-nav" aria-label="Hlavní menu">
+      <button id="navBoards" class="nav-item"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg><span>Nástěnky</span></button>
+      <button id="navTasks" class="nav-item"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 11l3 3 8-8"/><path d="M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h9"/></svg><span>Moje úkoly</span><span id="navTaskCount" class="nav-count" hidden>0</span></button>
+      <button id="navAdmin" class="nav-item" hidden><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.8"/><path d="M16 3.2A4 4 0 0 1 16 11"/></svg><span>Správa uživatelů</span></button>
+    </nav>
+    <div class="side-section">
+      <div class="side-heading">Nástěnky</div>
+      <div id="sideBoards" class="side-boards"></div>
+    </div>
+    <button id="sideUser" class="side-user">
+      <span id="sideAvatar" class="avatar"></span>
+      <span class="side-user-text"><span id="sideUserName" class="side-user-name"></span><span id="sideUserRole" class="side-user-role"></span></span>
+    </button>
+  </aside>
+
+  <div class="main-col">
   <header class="topbar">
     <div class="topbar-left">
-      <button id="homeBtn" class="icon-btn" title="Nástěnky" aria-label="Nástěnky">
-        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg>
+      <button id="homeBtn" class="icon-btn mobile-only" title="Nástěnky" aria-label="Nástěnky">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg>
       </button>
-      <span class="logo"><span class="logo-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><rect x="4" y="4" width="6" height="14" rx="1.5"/><rect x="14" y="4" width="6" height="9" rx="1.5"/></svg></span><span class="logo-text">Trellite</span><span class="logo-pro">PRO</span></span>
-      <span id="syncDot" class="sync-dot" title="Stav připojení"></span>
-    </div>
-    <div class="topbar-center">
-      <button id="boardStar" class="board-star" title="Přidat k oblíbeným" hidden>
-        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.5 9.7l5.9-.9z"/></svg>
-      </button>
-      <span id="boardTitle" class="board-title" contenteditable="false"></span>
+      <div class="page-head">
+        <div id="crumb" class="crumb">Pracovní prostor</div>
+        <div class="page-title-row">
+          <h1 id="pageTitle" class="page-title" hidden></h1>
+          <span id="boardTitle" class="board-title" contenteditable="false"></span>
+          <button id="boardStar" class="board-star" title="Přidat k oblíbeným" aria-label="Přidat k oblíbeným" hidden>
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.5 9.7l5.9-.9z"/></svg>
+          </button>
+          <span id="syncPill" class="sync-pill"><span id="syncDot" class="sync-dot" title="Stav připojení"></span><span id="syncText">Připojuji…</span></span>
+        </div>
+      </div>
     </div>
     <div class="topbar-right">
       <div id="searchWrap" class="search-wrap" hidden>
-        <svg class="icon search-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
-        <input id="searchInput" class="search" type="search" placeholder="Hledat karty…" />
+        <svg class="icon search-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+        <input id="searchInput" class="search" type="search" placeholder="Hledat karty…" aria-label="Hledat karty" />
       </div>
+      <div id="boardMembers" class="member-stack" hidden></div>
       <button id="filterBtn" class="pill-btn" hidden>
-        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h18l-7 8v5l-4 2v-7z"/></svg>
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 5h18M6 12h12M10 19h4"/></svg>
         <span id="filterLabel">Filtr</span>
       </button>
-      <button id="tasksBtn" class="pill-btn" title="Moje úkoly">
-        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M8 12.2l2.6 2.6L16 9.4"/></svg>
-        <span>Moje úkoly</span>
+      <button id="newCardBtn" class="primary-btn" hidden>
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>Nová karta</span>
+      </button>
+      <button id="tasksBtn" class="pill-btn mobile-only" title="Moje úkoly">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M8 12.2l2.6 2.6L16 9.4"/></svg>
         <span id="taskBadge" class="task-badge" hidden>0</span>
       </button>
       <button id="themeBtn" class="icon-btn" title="Přepnout tmavý režim" aria-label="Přepnout tmavý režim">
-        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.5A8.5 8.5 0 1 1 11.5 3 6.5 6.5 0 0 0 21 12.5z"/></svg>
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.5A8.5 8.5 0 1 1 11.5 3 6.5 6.5 0 0 0 21 12.5z"/></svg>
       </button>
       <button id="menuBtn" class="icon-btn" title="Menu nástěnky" aria-label="Menu nástěnky" hidden>
-        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>
       </button>
-      <button id="userBtn" class="user-btn" title="Účet"><span id="userAvatar" class="avatar sm"></span></button>
+      <button id="userBtn" class="user-btn mobile-only" title="Účet" aria-label="Účet"><span id="userAvatar" class="avatar sm"></span></button>
     </div>
   </header>
 
   <!-- Přehled nástěnek -->
   <main id="boardsView" class="boards-view">
-    <div id="adminBar" class="admin-bar" hidden></div>
-    <section id="starredSection" hidden>
-      <h2 class="section-title">Oblíbené nástěnky</h2>
-      <div id="starredGrid" class="boards-grid"></div>
+    <div class="welcome">
+      <div>
+        <h2 id="greeting" class="welcome-title"></h2>
+        <p id="greetingSub" class="welcome-sub"></p>
+      </div>
+      <button id="newBoardBtn" class="primary-btn" hidden><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>Nová nástěnka</span></button>
+    </div>
+    <section id="tasksSection" class="ov-section" hidden>
+      <h2 class="section-title">Moje úkoly <span id="tasksCount" class="section-count"></span></h2>
+      <div id="tasksList" class="task-rows"></div>
     </section>
-    <h2 class="section-title">Nástěnky</h2>
-    <div id="boardsGrid" class="boards-grid"></div>
+    <section class="ov-section">
+      <h2 class="section-title">Nástěnky</h2>
+      <div id="boardsGrid" class="boards-grid"></div>
+    </section>
     <button id="resetSampleBtn" class="reset-sample" hidden>Obnovit ukázková data</button>
   </main>
 
@@ -110,10 +144,11 @@
 
   <!-- Správa uživatelů (admin) -->
   <main id="adminView" class="admin-view" hidden>
-    <h1 class="admin-title">Správa uživatelů</h1>
     <div id="adminUsers"></div>
-    <button id="addUserBtn" class="pop-btn" style="max-width:220px">+ Přidat uživatele</button>
+    <button id="addUserBtn" class="primary-btn"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>Přidat uživatele</span></button>
   </main>
+  </div>
+  </div>
 
   <!-- Detail karty -->
   <div id="modalOverlay" class="modal-overlay" hidden>
@@ -122,8 +157,8 @@
       <button id="modalClose" class="modal-close" aria-label="Zavřít">×</button>
       <div class="modal-grid">
         <div class="modal-main">
-          <input id="cardTitleInput" class="card-title-input" />
           <div class="modal-meta" id="cardListName"></div>
+          <input id="cardTitleInput" class="card-title-input" aria-label="Název karty" />
           <div id="cardQuickRow" class="card-quick-row"></div>
           <div id="modalBody"></div>
         </div>

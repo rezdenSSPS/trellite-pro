@@ -5,11 +5,9 @@
 
 const LABEL_COLORS = ["#5a9e6f", "#cf9a46", "#cf8a4e", "#c15f5b", "#8d6fae", "#4c6793", "#4f9aa3", "#6fa58d", "#b07f99", "#5b6b8c", "#8a93a1", "#3f5e79"];
 const BOARD_BGS = [
-  { type: "color", value: "#3d4f6d" }, { type: "color", value: "#44607a" }, { type: "color", value: "#3f5e54" },
-  { type: "color", value: "#6d5a4a" }, { type: "color", value: "#5a4e6d" }, { type: "color", value: "#6d4a52" },
-  { type: "color", value: "#2f3b47" }, { type: "color", value: "#4a5a6a" },
-  { type: "gradient", value: "linear-gradient(135deg,#334155,#475569)" }, { type: "gradient", value: "linear-gradient(135deg,#3d4f6d,#56688c)" },
-  { type: "gradient", value: "linear-gradient(135deg,#3f5e54,#5a7d6f)" }, { type: "gradient", value: "linear-gradient(135deg,#4a4e69,#6b6f8c)" },
+  { type: "color", value: "#4f46e5" }, { type: "color", value: "#c2410c" }, { type: "color", value: "#15803d" },
+  { type: "color", value: "#7e22ce" }, { type: "color", value: "#0f766e" }, { type: "color", value: "#be123c" },
+  { type: "color", value: "#0369a1" }, { type: "color", value: "#52525b" },
 ];
 const CLIENT_ID = Math.random().toString(36).slice(2);
 
@@ -37,6 +35,7 @@ const ICONS = {
   more: '<circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/>',
   users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.8"/><path d="M16 3.2A4 4 0 0 1 16 11"/>',
   logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/>',
+  plus: '<path d="M12 5v14"/><path d="M5 12h14"/>',
   key: '<circle cx="8" cy="15" r="4"/><path d="M11 12 20 3"/><path d="M17 6l2 2"/><path d="M15 8l2 2"/>',
 };
 function icon(name, size = 18) { return `<svg class="icon" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ""}</svg>`; }
@@ -133,14 +132,44 @@ async function refetchState() {
 }
 
 /* ---------- Sync tečka ---------- */
-function setSync(cls, title) { const d = el("syncDot"); if (!d) return; d.className = "sync-dot " + cls; d.title = title; }
+function setSync(cls, title) { const d = el("syncDot"); if (!d) return; d.className = "sync-dot " + cls; d.title = title;
+  el("syncPill").className = "sync-pill " + cls;
+  el("syncText").textContent = cls === "online" ? "Synchronizováno" : cls === "saving" ? "Ukládám…" : cls === "offline" ? "Offline" : title; }
 
 /* ============================================================
    Pomocníci
    ============================================================ */
 const getMember = (id) => state.members.find((m) => m.id === id);
 const initials = (name) => (name || "?").trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
-function avatarEl(member, size = "") { const a = document.createElement("span"); a.className = "avatar " + size; a.style.background = member.color; a.textContent = initials(member.name); a.title = member.name; return a; }
+function avatarEl(member, size = "") { const a = document.createElement("span"); a.className = "avatar " + size; paintAvatar(a, member); a.title = member.name; return a; }
+function paintAvatar(a, member) { a.style.background = tint(member.color, 0.82); a.style.color = shade(member.color, 0.45); a.textContent = initials(member.name); }
+
+/* Barvy: z uložené barvy (nástěnky, člena) uděláme jemnou tintu a tmavý inkoust. */
+function hexOf(v) { const m = String(v || "").match(/#([0-9a-f]{6})/i); return m ? "#" + m[1] : "#71717a"; }
+function rgbOf(hex) { const h = hexOf(hex).slice(1); return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16)); }
+const toHex = (rgb) => "#" + rgb.map((x) => Math.round(Math.max(0, Math.min(255, x))).toString(16).padStart(2, "0")).join("");
+function tint(hex, amt) { return toHex(rgbOf(hex).map((c) => c + (255 - c) * amt)); }
+function shade(hex, amt) { return toHex(rgbOf(hex).map((c) => c * (1 - amt))); }
+function plural(n, one, few, many) { return n === 1 ? one : (n >= 2 && n <= 4) ? few : many; }
+function relTime(ts) {
+  const diff = Date.now() - ts, min = 60e3, hr = 60 * min, day = 24 * hr;
+  if (diff < min) return "právě teď";
+  if (diff < hr) return `před ${Math.floor(diff / min)} min`;
+  if (diff < day) return `před ${Math.floor(diff / hr)} h`;
+  if (diff < 2 * day) return "včera";
+  if (diff < 7 * day) return `před ${Math.floor(diff / day)} dny`;
+  return fmtDue(ts);
+}
+function boardCards(b) { return b.lists.filter((l) => !l.archived).flatMap((l) => l.cards.filter((c) => !c.archived).map((c) => ({ c, l }))); }
+function boardMembers(b) { const ids = new Set(); boardCards(b).forEach(({ c }) => (c.memberIds || []).forEach((id) => ids.add(id))); return [...ids].map(getMember).filter(Boolean); }
+const DONE_RE = /hotov|done|dokon|splněn/i;
+function listDot(title) {
+  if (DONE_RE.test(title)) return "#16a34a";
+  if (/probíh|průběh|progress|řeší|dělá/i.test(title)) return "var(--accent)";
+  if (/kontrol|review|čeká|schvál/i.test(title)) return "#d97706";
+  if (/problém|chyb|bug|urgent/i.test(title)) return "#dc2626";
+  return "#a1a1aa";
+}
 
 function fmtDue(ts) {
   const d = new Date(ts), now = new Date(); const opts = { month: "short", day: "numeric" };
@@ -163,10 +192,39 @@ function applyTheme() { document.documentElement.setAttribute("data-theme", (sta
 
 function updateUserUI() {
   if (!me) return;
-  const av = el("userAvatar"); av.textContent = initials(me.name); av.style.background = me.color;
+  paintAvatar(el("userAvatar"), me); paintAvatar(el("sideAvatar"), me);
   el("userBtn").title = me.name + (isAdmin() ? " (admin)" : "");
+  el("sideUserName").textContent = me.name; el("sideUserRole").textContent = isAdmin() ? "Administrátor" : "Manažer";
   const badge = el("taskBadge"); const n = me.newTaskCount || 0;
   badge.textContent = n; badge.hidden = n === 0;
+  const nc = el("navTaskCount"); nc.textContent = n; nc.hidden = n === 0;
+  el("navAdmin").hidden = !isAdmin();
+  renderSidebar();
+}
+function renderSidebar() {
+  if (!state) return;
+  const box = el("sideBoards"); box.innerHTML = "";
+  state.boards.filter((b) => !b.virtual).sort((a, b) => (b.starred ? 1 : 0) - (a.starred ? 1 : 0)).forEach((b) => {
+    const btn = document.createElement("button"); btn.className = "side-board" + (viewMode === "board" && currentBoardId === b.id ? " active" : "");
+    const dot = document.createElement("span"); dot.className = "side-dot"; dot.style.background = hexOf(b.bg.value);
+    const name = document.createElement("span"); name.className = "side-board-name"; name.textContent = b.title;
+    btn.append(dot, name); btn.onclick = () => openBoard(b.id); box.appendChild(btn);
+  });
+  el("navBoards").classList.toggle("active", viewMode === "boards");
+  el("navTasks").classList.toggle("active", viewMode === "board" && isMyTasks());
+  el("navAdmin").classList.toggle("active", viewMode === "admin");
+}
+function setHeader({ crumb, title, board }) {
+  el("crumb").textContent = crumb;
+  el("pageTitle").hidden = !!board; el("pageTitle").textContent = board ? "" : title;
+  el("boardTitle").hidden = !board;
+}
+function renderBoardMembers(b) {
+  const box = el("boardMembers"); box.innerHTML = "";
+  const ms = b && !b.virtual ? boardMembers(b) : [];
+  box.hidden = ms.length === 0;
+  ms.slice(0, 3).forEach((m) => box.appendChild(avatarEl(m)));
+  if (ms.length > 3) { const more = document.createElement("span"); more.className = "avatar more"; more.textContent = "+" + (ms.length - 3); box.appendChild(more); }
 }
 
 function showBoards() {
@@ -174,73 +232,92 @@ function showBoards() {
   el("boardsView").hidden = false; el("boardView").hidden = true; el("adminView").hidden = true;
   el("boardTitle").textContent = ""; el("boardTitle").setAttribute("contenteditable", "false");
   el("boardStar").hidden = true; el("searchWrap").hidden = true; el("searchInput").value = "";
-  el("filterBtn").hidden = true; el("menuBtn").hidden = true;
-  document.body.style.background = "";
-  renderBoards();
+  el("filterBtn").hidden = true; el("menuBtn").hidden = true; el("newCardBtn").hidden = true; el("boardMembers").hidden = true;
+  setHeader({ crumb: "Pracovní prostor", title: "Přehled" });
+  renderBoards(); renderSidebar();
 }
 function openBoard(id) {
   const b = state.boards.find((x) => x.id === id); if (!b) return showBoards();
   viewMode = "board"; currentBoardId = id; filter = { labels: [], members: [], due: null };
   el("boardsView").hidden = true; el("boardView").hidden = false; el("adminView").hidden = true;
-  applyBoardBg(b);
+  setHeader({ crumb: b.virtual ? "Pracovní prostor" : "Pracovní prostor / Nástěnky", board: true });
   el("boardTitle").textContent = b.title;
   el("boardTitle").setAttribute("contenteditable", (isAdmin() && !b.virtual) ? "true" : "false");
   el("boardStar").hidden = !(isAdmin() && !b.virtual); el("boardStar").classList.toggle("on", !!b.starred);
   el("searchWrap").hidden = false; el("filterBtn").hidden = false; updateFilterBtn();
   el("menuBtn").hidden = b.virtual ? true : false;
   el("addListBtn").hidden = !(isAdmin() && !b.virtual);
-  renderBoard();
+  el("newCardBtn").hidden = !!b.virtual;
+  renderBoard(); renderSidebar();
 }
-function applyBoardBg(b) { document.body.style.background = b.bg.value; document.body.style.backgroundSize = "cover"; }
 
 /* ============================================================
    Přehled nástěnek
    ============================================================ */
 function renderBoards() {
-  // admin lišta
-  const bar = el("adminBar");
-  bar.innerHTML = "";
-  if (isAdmin()) {
-    bar.hidden = false;
-    const b1 = document.createElement("button"); b1.className = "admin-bar-btn"; b1.innerHTML = `${icon("users", 16)} Správa uživatelů`; b1.onclick = showAdmin;
-    bar.appendChild(b1);
-  } else bar.hidden = true;
+  const first = (me.name || "").trim().split(/\s+/)[0];
+  const h = new Date().getHours();
+  el("greeting").textContent = `${h < 10 ? "Dobré ráno" : h < 18 ? "Dobrý den" : "Dobrý večer"}, ${first}`;
 
-  const starred = state.boards.filter((b) => !b.virtual && b.starred);
-  const rest = state.boards.filter((b) => !b.virtual && !b.starred);
-  el("starredSection").hidden = starred.length === 0;
-  el("starredGrid").innerHTML = ""; starred.forEach((b) => el("starredGrid").appendChild(boardCardEl(b)));
+  // Moje úkoly: karty přiřazené mně, seřazené podle termínu
+  const mt = state.boards.find((b) => b.virtual);
+  const tasks = mt ? mt.lists.flatMap((l) => l.cards.map((c) => ({ c, l }))) : [];
+  tasks.sort((x, y) => (x.c.due ? x.c.due.date : Infinity) - (y.c.due ? y.c.due.date : Infinity));
+  const late = tasks.filter(({ c }) => dueState(c.due) === "overdue").length;
+  el("greetingSub").textContent = tasks.length
+    ? `Máš ${tasks.length} ${plural(tasks.length, "přiřazený úkol", "přiřazené úkoly", "přiřazených úkolů")}` + (late ? `, ${late} ${plural(late, "je", "jsou", "je")} po termínu.` : ".")
+    : "Nemáš žádné přiřazené úkoly.";
+  el("tasksSection").hidden = tasks.length === 0;
+  el("tasksCount").textContent = tasks.length;
+  const rows = el("tasksList"); rows.innerHTML = "";
+  tasks.slice(0, 6).forEach(({ c, l }) => rows.appendChild(taskRowEl(c, l)));
+  if (tasks.length > 6) { const more = document.createElement("button"); more.className = "task-row more"; more.textContent = `Zobrazit všech ${tasks.length} úkolů`; more.onclick = openMyTasks; rows.appendChild(more); }
+
   const grid = el("boardsGrid"); grid.innerHTML = "";
-  // Moje úkoly karta první
-  grid.appendChild(myTasksCardEl());
-  rest.forEach((b) => grid.appendChild(boardCardEl(b)));
-  if (isAdmin()) { const add = document.createElement("button"); add.className = "board-card new"; add.textContent = "+ Vytvořit novou nástěnku"; add.onclick = createBoard; grid.appendChild(add); }
+  state.boards.filter((b) => !b.virtual).sort((a, b) => (b.starred ? 1 : 0) - (a.starred ? 1 : 0)).forEach((b) => grid.appendChild(boardCardEl(b)));
+  if (isAdmin()) { const add = document.createElement("button"); add.className = "board-card new"; add.innerHTML = `${icon("plus", 20)}<span>Vytvořit nástěnku</span>`; add.onclick = createBoard; grid.appendChild(add); }
+  el("newBoardBtn").hidden = !isAdmin();
   el("resetSampleBtn").hidden = !isAdmin();
 }
-function myTasksCardEl() {
-  const mt = state.boards.find((b) => b.virtual);
-  const btn = document.createElement("button"); btn.className = "board-card mytasks";
-  btn.style.backgroundImage = "linear-gradient(135deg,#2f3b4c,#475569)";
-  const n = me.newTaskCount || 0;
-  btn.innerHTML = `<span style="display:flex;align-items:center;gap:8px">${icon("check", 20)} Moje úkoly</span>` + (n ? `<span class="task-badge" style="position:absolute;top:10px;right:10px">${n}</span>` : "");
-  btn.onclick = openMyTasks;
-  return btn;
+function taskRowEl(c, l) {
+  const row = document.createElement("button"); row.className = "task-row";
+  const st = dueState(c.due);
+  const dueCls = st === "overdue" ? "due-overdue" : st === "soon" ? "due-soon" : st === "done" ? "due-done" : "";
+  const dueTxt = !c.due ? "Bez termínu" : st === "overdue" ? "Po termínu" : st === "soon" ? "Dnes" : fmtDue(c.due.date).replace(/,.*$/, "");
+  const where = c._origin ? c._origin.boardTitle : "";
+  row.innerHTML = `<span class="task-check${st === "done" ? " done" : ""}" aria-hidden="true"></span><span class="task-title">${escapeHtml(c.title)}</span><span class="task-board">${escapeHtml(where)}</span><span class="task-due ${dueCls}">${escapeHtml(dueTxt)}</span>`;
+  row.onclick = () => { openBoard("__mytasks__"); openCard(l.id, c.id); };
+  return row;
 }
 function boardCardEl(b) {
-  const btn = document.createElement("button"); btn.className = "board-card";
-  if (b.bg.type === "gradient") btn.style.backgroundImage = b.bg.value; else btn.style.background = b.bg.value;
-  btn.textContent = b.title; btn.onclick = () => openBoard(b.id);
+  const card = document.createElement("div"); card.className = "board-card"; card.tabIndex = 0; card.setAttribute("role", "button");
+  const color = hexOf(b.bg.value);
+  const cards = boardCards(b);
+  const done = cards.filter(({ c, l }) => DONE_RE.test(l.title) || (c.due && c.due.done)).length;
+  const pct = cards.length ? Math.round(done / cards.length * 100) : 0;
+  const members = boardMembers(b).length;
+  const lastTs = Math.max(0, ...(b.activity || []).map((a) => a.ts || 0), ...cards.map(({ c }) => c.createdAt || 0));
+  card.innerHTML = `
+    <div class="bc-head">
+      <span class="bc-tile" style="background:${tint(color, 0.86)};color:${shade(color, 0.25)}">${escapeHtml(initials(b.title).slice(0, 1))}</span>
+      <div class="bc-name"><span class="bc-title">${escapeHtml(b.title)}</span><span class="bc-sub">${lastTs ? "Upraveno " + relTime(lastTs) : "Zatím bez úprav"}</span></div>
+      ${b.starred ? `<svg class="bc-starred" width="16" height="16" viewBox="0 0 24 24" role="img" aria-label="Oblíbená"><path d="M12 3.5l2.6 5.3 5.9.9-4.2 4.1 1 5.8L12 16.8l-5.3 2.8 1-5.8-4.2-4.1 5.9-.9z"/></svg>` : ""}
+    </div>
+    <div class="bc-progress"><div class="bc-progress-row"><span>Hotovo</span><span class="mono">${pct} %</span></div><div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div></div>
+    <div class="bc-meta"><span>${cards.length} ${plural(cards.length, "karta", "karty", "karet")}</span><span>${members} ${plural(members, "člen", "členové", "členů")}</span></div>`;
+  card.onclick = () => openBoard(b.id);
+  card.onkeydown = (e) => { if (e.target === card && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); openBoard(b.id); } };
   if (isAdmin()) {
     const actions = document.createElement("div"); actions.className = "bc-actions";
-    const star = document.createElement("button"); star.className = "bc-btn bc-star" + (b.starred ? " on" : ""); star.textContent = b.starred ? "★" : "☆"; star.title = "Oblíbené";
+    const star = document.createElement("button"); star.className = "bc-btn bc-star" + (b.starred ? " on" : ""); star.textContent = b.starred ? "★" : "☆"; star.title = b.starred ? "Odebrat z oblíbených" : "Přidat do oblíbených"; star.setAttribute("aria-label", star.title);
     star.onclick = (e) => { e.stopPropagation(); mutate("PATCH", "/boards/" + b.id, { starred: !b.starred }); };
-    const arch = document.createElement("button"); arch.className = "bc-btn"; arch.innerHTML = icon("archive", 14); arch.title = "Archivovat nástěnku";
+    const arch = document.createElement("button"); arch.className = "bc-btn"; arch.innerHTML = icon("archive", 14); arch.title = "Archivovat nástěnku"; arch.setAttribute("aria-label", arch.title);
     arch.onclick = (e) => { e.stopPropagation(); mutate("POST", "/boards/" + b.id + "/archive"); };
-    const del = document.createElement("button"); del.className = "bc-btn"; del.textContent = "×"; del.title = "Smazat nástěnku";
+    const del = document.createElement("button"); del.className = "bc-btn"; del.textContent = "×"; del.title = "Smazat nástěnku"; del.setAttribute("aria-label", del.title);
     del.onclick = (e) => { e.stopPropagation(); if (confirm(`Smazat nástěnku „${b.title}“? Tuto akci nelze vrátit.`)) mutate("DELETE", "/boards/" + b.id); };
-    actions.append(star, arch, del); btn.appendChild(actions);
+    actions.append(star, arch, del); card.appendChild(actions);
   }
-  return btn;
+  return card;
 }
 async function openMyTasks() { try { applyPayload(await api("POST", "/account/seen")); } catch (e) {} openBoard("__mytasks__"); }
 function createBoard() {
@@ -267,6 +344,7 @@ function cardVisible(card) {
 }
 function renderBoard() {
   const b = getBoard(); if (!b) return;
+  renderBoardMembers(b);
   const listsEl = el("lists"); listsEl.innerHTML = "";
   b.lists.filter((l) => !l.archived).forEach((l) => listsEl.appendChild(renderList(l, b)));
 }
@@ -284,7 +362,8 @@ function renderList(list, board) {
   const title = document.createElement("input"); title.className = "list-title"; title.value = list.title; title.draggable = false; title.readOnly = !structural;
   if (structural) title.onchange = () => mutate("PATCH", "/lists/" + list.id, { title: title.value.trim() || "Bez názvu" });
   const count = document.createElement("span"); count.className = "list-count"; count.textContent = list.cards.filter((c) => !c.archived).length;
-  header.append(title, count);
+  const dot = document.createElement("span"); dot.className = "list-dot"; dot.style.background = listDot(list.title);
+  header.append(dot, title, count);
   if (!virtual) { const actions = document.createElement("button"); actions.className = "list-actions-btn"; actions.innerHTML = icon("more"); actions.title = "Akce seznamu"; actions.onclick = (e) => openListMenu(e.currentTarget, list); header.append(actions); }
   header.onclick = (e) => { if (list.collapsed && e.target === header) mutate("PATCH", "/lists/" + list.id, { collapsed: false }); };
   wrap.appendChild(header);
@@ -441,11 +520,13 @@ function renderModal() {
   el("cardTitleInput").value = card.title;
   el("cardTitleInput").readOnly = false;
   const where = card._origin ? `${escapeHtml(card._origin.boardTitle)} · ${escapeHtml(card._origin.listTitle)}` : escapeHtml(list.title);
-  el("cardListName").innerHTML = `v seznamu <b>${where}</b>`;
+  el("cardListName").innerHTML = `<span class="list-dot" style="background:${listDot(card._origin ? card._origin.listTitle : list.title)}"></span>${card._origin ? "" : escapeHtml(board.title) + " · "}<b>${where}</b>`;
 
   const quick = el("cardQuickRow"); quick.innerHTML = "";
-  if (card.memberIds.length) { const g = document.createElement("div"); g.className = "quick-group"; g.innerHTML = `<div class="quick-label">Přiřazeno</div>`;
-    const v = document.createElement("div"); v.className = "quick-values"; card.memberIds.forEach((id) => { const m = getMember(id); if (m) v.appendChild(avatarEl(m, "lg")); }); g.appendChild(v); quick.appendChild(g); }
+  { const g = document.createElement("div"); g.className = "quick-group"; g.innerHTML = `<div class="quick-label">Řešitelé</div>`;
+    const v = document.createElement("div"); v.className = "quick-values"; card.memberIds.forEach((id) => { const m = getMember(id); if (m) v.appendChild(avatarEl(m, "lg")); });
+    const addM = document.createElement("button"); addM.className = "avatar-add"; addM.innerHTML = icon("plus", 14); addM.title = "Přidat řešitele"; addM.setAttribute("aria-label", addM.title); addM.onclick = (e) => memberPopover(e.currentTarget, card);
+    v.appendChild(addM); g.appendChild(v); quick.appendChild(g); }
   if (card.labelIds.length) { const g = document.createElement("div"); g.className = "quick-group"; g.innerHTML = `<div class="quick-label">Štítky</div>`;
     const v = document.createElement("div"); v.className = "quick-values"; card.labelIds.forEach((id) => { const lab = board.labels.find((l) => l.id === id); if (!lab) return;
       const s = document.createElement("span"); s.className = "card-label tall"; s.style.background = lab.color; s.style.minWidth = "48px"; s.textContent = lab.name || ""; v.appendChild(s); }); g.appendChild(v); quick.appendChild(g); }
@@ -630,7 +711,7 @@ function renderDrawer() {
   const add = (ic, label, fn) => { const r = document.createElement("div"); r.className = "drawer-row"; r.innerHTML = `<span class="ico">${ic}</span><span>${label}</span>`; r.onclick = fn; bodyEl.appendChild(r); };
   if (view === "main") {
     titleEl.textContent = "Menu";
-    if (isAdmin()) { add(icon("image"), "Změnit pozadí", () => pushDrawer("bg")); add(icon("tag"), "Štítky", () => pushDrawer("labels")); }
+    if (isAdmin()) { add(icon("image"), "Barva nástěnky", () => pushDrawer("bg")); add(icon("tag"), "Štítky", () => pushDrawer("labels")); }
     add(icon("filter"), "Filtrovat karty", () => pushDrawer("filter"));
     bodyEl.insertAdjacentHTML("beforeend", `<div class="drawer-section-title">Položky</div>`);
     add(icon("activity"), "Aktivita", () => pushDrawer("activity"));
@@ -641,7 +722,7 @@ function renderDrawer() {
       add(icon("trash"), "Smazat nástěnku", () => { if (confirm(`Smazat nástěnku „${board.title}“?`)) { mutate("DELETE", "/boards/" + board.id); closeDrawer(); showBoards(); } });
     }
   } else if (view === "bg") {
-    titleEl.textContent = "Pozadí"; const grid = document.createElement("div"); grid.className = "bg-grid";
+    titleEl.textContent = "Barva nástěnky"; const grid = document.createElement("div"); grid.className = "bg-grid";
     BOARD_BGS.forEach((bg) => { const sw = document.createElement("div"); sw.className = "bg-swatch" + (board.bg.value === bg.value ? " selected" : ""); if (bg.type === "gradient") sw.style.backgroundImage = bg.value; else sw.style.background = bg.value; sw.onclick = () => mutate("PATCH", "/boards/" + board.id, { bg }); grid.appendChild(sw); });
     bodyEl.appendChild(grid);
   } else if (view === "labels") {
@@ -681,7 +762,9 @@ function renderFilterDrawer(bodyEl, titleEl, board) {
    Správa uživatelů (admin)
    ============================================================ */
 function showAdmin() { if (!isAdmin()) return; viewMode = "admin"; el("boardsView").hidden = true; el("boardView").hidden = true; el("adminView").hidden = false;
-  el("boardTitle").textContent = ""; el("boardStar").hidden = true; el("searchWrap").hidden = true; el("filterBtn").hidden = true; el("menuBtn").hidden = true; document.body.style.background = ""; renderAdmin(); }
+  el("boardTitle").textContent = ""; el("boardStar").hidden = true; el("searchWrap").hidden = true; el("filterBtn").hidden = true; el("menuBtn").hidden = true;
+  el("newCardBtn").hidden = true; el("boardMembers").hidden = true;
+  setHeader({ crumb: "Pracovní prostor", title: "Správa uživatelů" }); renderAdmin(); renderSidebar(); }
 function renderAdmin() {
   const box = el("adminUsers"); box.innerHTML = "";
   (usersAdmin || []).forEach((u) => {
@@ -740,6 +823,12 @@ el("drawerClose").onclick = closeDrawer; el("drawerBack").onclick = popDrawer;
 el("drawerOverlay").addEventListener("click", (e) => { if (e.target === el("drawerOverlay")) closeDrawer(); });
 el("filterBtn").onclick = () => openDrawer("filter");
 el("tasksBtn").onclick = openMyTasks;
+el("navBoards").onclick = () => { closeDrawer(); showBoards(); };
+el("navTasks").onclick = openMyTasks;
+el("navAdmin").onclick = showAdmin;
+el("newBoardBtn").onclick = createBoard;
+el("newCardBtn").onclick = () => { const w = document.querySelector(".list:not(.collapsed)"); if (!w) return toast("Nejdřív vytvořte seznam.");
+  const list = findList(w.dataset.listId); const btn = w.querySelector(".add-card-btn"); if (list && btn) { w.scrollIntoView({ inline: "start", behavior: "smooth" }); openCardComposer(w, list, btn); } };
 function updateFilterBtn() { const n = filter.labels.length + filter.members.length + (filter.due ? 1 : 0); el("filterLabel").textContent = n ? `Filtr (${n})` : "Filtr"; el("filterBtn").classList.toggle("active", n > 0); }
 el("themeBtn").onclick = () => { state.theme = state.theme === "dark" ? "light" : "dark"; if (me) me.theme = state.theme; applyTheme(); api("POST", "/account/theme", { theme: state.theme }).catch(() => {}); };
 el("searchInput").addEventListener("input", renderBoard);
@@ -748,6 +837,7 @@ el("boardTitle").addEventListener("blur", () => { const b = getBoard(); if (!b |
 el("boardTitle").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); el("boardTitle").blur(); } });
 el("resetSampleBtn").onclick = () => { if (confirm("Obnovit ukázková data? Nahradí to VŠE a budete se muset znovu přihlásit.")) api("POST", "/reset-sample").then((j) => { if (j && j.reload) location.reload(); }).catch(() => {}); };
 
+el("sideUser").onclick = (e) => el("userBtn").onclick(e);
 el("userBtn").onclick = (e) => {
   const body = document.createElement("div");
   const info = document.createElement("div"); info.className = "pop-user"; info.innerHTML = `<b>${escapeHtml(me.name)}</b><br><span style="color:var(--muted);font-size:12px">${escapeHtml(me.username)} · ${me.role === "admin" ? "admin" : "manažer"}</span>`; body.appendChild(info);
