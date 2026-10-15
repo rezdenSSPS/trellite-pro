@@ -1,96 +1,482 @@
-/* Trellite Pro — backend server.
-   Serves the static frontend from /public and persists the whole
-   workspace state as a JSON document. Uses Postgres when DATABASE_URL
-   is set (e.g. on Railway), otherwise a local JSON file for dev. */
+/* Trellite Pro — víceuživatelský backend.
+   - Přihlášení (jméno + heslo, bcrypt, JWT cookie)
+   - Role admin/manager, oprávnění na nástěnky a skryté seznamy
+   - Přiřazování úkolů + upozornění ("Moje úkoly")
+   - Živá synchronizace přes SSE
+   - Úložiště: PostgreSQL (DATABASE_URL) nebo lokální soubor (dev). */
 
 const express = require("express");
 const path = require("path");
 const fs = require("fs");
+const crypto = require("crypto");
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
+const cookieParser = require("cookie-parser");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const WORKSPACE_ID = "default";
 
 app.use(express.json({ limit: "15mb" }));
+app.use(cookieParser());
 app.use(express.static(path.join(__dirname, "public")));
 
-/* ---------- Storage abstraction ---------- */
-let storage;
+const uid = () => crypto.randomBytes(6).toString("hex");
 
+/* ============================================================
+   ÚLOŽIŠTĚ
+   ============================================================ */
+let storage;
 if (process.env.DATABASE_URL) {
   const { Pool } = require("pg");
   const useSsl = !/localhost|127\.0\.0\.1/.test(process.env.DATABASE_URL);
-  const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
-    ssl: useSsl ? { rejectUnauthorized: false } : false,
-  });
-
+  const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: useSsl ? { rejectUnauthorized: false } : false });
   async function init() {
-    await pool.query(`CREATE TABLE IF NOT EXISTS workspace (
-      id TEXT PRIMARY KEY,
-      data JSONB NOT NULL,
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-    )`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS workspace (id TEXT PRIMARY KEY, data JSONB NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT now())`);
   }
   storage = {
     ready: init(),
-    async get() {
-      const r = await pool.query("SELECT data FROM workspace WHERE id = $1", [WORKSPACE_ID]);
-      return r.rows[0] ? r.rows[0].data : null;
-    },
-    async set(data) {
-      await pool.query(
-        `INSERT INTO workspace (id, data, updated_at) VALUES ($1, $2, now())
-         ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`,
-        [WORKSPACE_ID, data]
-      );
-    },
+    async get() { const r = await pool.query("SELECT data FROM workspace WHERE id=$1", [WORKSPACE_ID]); return r.rows[0] ? r.rows[0].data : null; },
+    async set(data) { await pool.query(`INSERT INTO workspace (id,data,updated_at) VALUES ($1,$2,now()) ON CONFLICT (id) DO UPDATE SET data=EXCLUDED.data, updated_at=now()`, [WORKSPACE_ID, data]); },
   };
-  console.log("Storage: Postgres (DATABASE_URL detected)");
+  console.log("Úložiště: PostgreSQL");
 } else {
   const dir = path.join(__dirname, "data");
   const file = path.join(dir, "state.json");
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   storage = {
     ready: Promise.resolve(),
-    async get() {
-      try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch (e) { return null; }
-    },
-    async set(data) {
-      fs.writeFileSync(file, JSON.stringify(data));
-    },
+    async get() { try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch (e) { return null; } },
+    async set(data) { fs.writeFileSync(file, JSON.stringify(data)); },
   };
-  console.log("Storage: local JSON file (no DATABASE_URL — dev mode)");
+  console.log("Úložiště: lokální soubor (dev)");
 }
 
-/* ---------- API ---------- */
+/* In-memory autoritativní dokument */
+let DOC = null;
+let version = 1;
+async function loadDoc() {
+  await storage.ready;
+  let d = await storage.get();
+  if (!d || !d.users) { d = seed(); await storage.set(d); }
+  if (!d.meta) d.meta = {};
+  if (!d.meta.jwtSecret) { d.meta.jwtSecret = crypto.randomBytes(32).toString("hex"); await storage.set(d); }
+  DOC = d;
+}
+let saveTimer = null;
+function persist() { clearTimeout(saveTimer); saveTimer = setTimeout(() => storage.set(DOC).catch((e) => console.error("persist", e)), 150); }
+
+/* ============================================================
+   UKÁZKOVÁ DATA
+   ============================================================ */
+const LABELS_DEF = [["Urgentní", "#cf8a4e"], ["Běžné", "#4c6793"], ["Čeká", "#cf9a46"], ["Hotovo", "#5a9e6f"], ["Problém", "#c15f5b"], ["Info", "#4f9aa3"]];
+const AVATAR_COLORS = ["#4c6793", "#c15f5b", "#5a9e6f", "#cf9a46", "#8d6fae", "#cf8a4e", "#4f9aa3", "#b07f99"];
+const CITY_BGS = {
+  "Mělník": { type: "color", value: "#3d4f6d" },
+  "Benešov": { type: "color", value: "#3f5e54" },
+  "Vlašim": { type: "color", value: "#6d5a4a" },
+  "Krumlov": { type: "color", value: "#5a4e6d" },
+  "Neratovice": { type: "color", value: "#44607a" },
+};
+const LIST_NAMES = ["Zaměstnanci", "Vozidla", "Nábory", "Restaurace", "Problémy", "Aktuální úkoly"];
+
+function seed() {
+  const days = (n) => Date.now() + n * 864e5;
+  const mkUser = (username, name, role, ci) => ({
+    id: uid(), username, passwordHash: bcrypt.hashSync(role === "admin" ? "admin123" : "heslo123", 10),
+    name, role, color: AVATAR_COLORS[ci % AVATAR_COLORS.length], theme: "light", access: {}, newTaskIds: [],
+  });
+  const admin = mkUser("admin", "Admin", "admin", 0);
+  const petra = mkUser("petra", "Petra Nováková", "manager", 1);
+  const jan = mkUser("jan", "Jan Svoboda", "manager", 2);
+  const eva = mkUser("eva", "Eva Dvořáková", "manager", 3);
+  const users = [admin, petra, jan, eva];
+
+  const boards = [];
+  const boardByCity = {};
+  Object.keys(CITY_BGS).forEach((city) => {
+    const labels = LABELS_DEF.map(([name, color]) => ({ id: uid(), name, color }));
+    const lists = LIST_NAMES.map((n) => ({ id: uid(), title: n, archived: false, collapsed: false, cards: [] }));
+    const b = { id: uid(), title: city, bg: CITY_BGS[city], starred: false, archived: false, labels, activity: [], lists };
+    boards.push(b); boardByCity[city] = b;
+  });
+
+  const card = (title, o = {}) => ({
+    id: uid(), title, desc: o.desc || "", archived: false, labelIds: o.labels || [], memberIds: o.members || [],
+    due: o.due || null, start: null, cover: o.cover || null, checklists: o.checklists || [], attachments: [], comments: o.comments || [], createdAt: Date.now(),
+  });
+  const listByName = (b, name) => b.lists.find((l) => l.title === name);
+  const L = (b) => b.labels.reduce((a, l) => (a[l.name] = l.id, a), {});
+  const cm = (mid, text, agoH) => ({ id: uid(), memberId: mid, text, ts: Date.now() - agoH * 3600e3 });
+
+  // Mělník
+  {
+    const b = boardByCity["Mělník"]; const lab = L(b);
+    listByName(b, "Vozidla").cards.push(card("Servis vozu 5809", { labels: [lab["Urgentní"]], members: [petra.id], due: { date: days(3), done: false }, desc: "Pravidelný servis + výměna oleje." }));
+    listByName(b, "Zaměstnanci").cards.push(card("Doplnit směny na víkend", { labels: [lab["Běžné"]], members: [petra.id], due: { date: days(1), done: false } }));
+    listByName(b, "Restaurace").cards.push(card("Kontrola skladu – restaurace náměstí", { labels: [lab["Info"]] }));
+    listByName(b, "Problémy").cards.push(card("Rozbité topení v provozovně", { labels: [lab["Problém"]], members: [petra.id], due: { date: days(-1), done: false } }));
+  }
+  // Neratovice
+  {
+    const b = boardByCity["Neratovice"]; const lab = L(b);
+    listByName(b, "Nábory").cards.push(card("Nábor – brigádník na léto", { labels: [lab["Běžné"]], members: [petra.id] }));
+    listByName(b, "Aktuální úkoly").cards.push(card("Předat podklady pro fakturaci", { labels: [lab["Čeká"]], members: [petra.id], due: { date: days(5), done: false } }));
+  }
+  // Benešov
+  {
+    const b = boardByCity["Benešov"]; const lab = L(b);
+    listByName(b, "Problémy").cards.push(card("Stížnost zákazníka – objednávka #2231", { labels: [lab["Problém"]], members: [jan.id], due: { date: days(2), done: false }, comments: [cm(jan.id, "Zavolám zákazníkovi zítra.", 5)] }));
+    listByName(b, "Vozidla").cards.push(card("Přezout pneumatiky – dodávka", { labels: [lab["Běžné"]], members: [jan.id] }));
+  }
+  // Vlašim
+  {
+    const b = boardByCity["Vlašim"]; const lab = L(b);
+    listByName(b, "Zaměstnanci").cards.push(card("Školení BOZP", { labels: [lab["Info"]], members: [jan.id], due: { date: days(7), done: false } }));
+  }
+  // Krumlov
+  {
+    const b = boardByCity["Krumlov"]; const lab = L(b);
+    listByName(b, "Restaurace").cards.push(card("Nové menu – návrh", { labels: [lab["Běžné"]], members: [eva.id], due: { date: days(4), done: false } }));
+    listByName(b, "Aktuální úkoly").cards.push(card("Objednat ubrusy", { labels: [lab["Čeká"]], members: [eva.id] }));
+  }
+
+  // Oprávnění managerů
+  const grant = (user, city, hidden = []) => { const b = boardByCity[city]; user.access[b.id] = { hidden: hidden.map((n) => listByName(b, n).id) }; };
+  grant(petra, "Mělník"); grant(petra, "Neratovice");
+  grant(jan, "Benešov", ["Nábory"]); grant(jan, "Vlašim");
+  grant(eva, "Krumlov");
+
+  // Počáteční upozornění (nové přiřazené úkoly)
+  const assignedOf = (u) => { const ids = []; boards.forEach((b) => b.lists.forEach((l) => l.cards.forEach((c) => { if (c.memberIds.includes(u.id)) ids.push(c.id); }))); return ids; };
+  [petra, jan, eva].forEach((u) => { u.newTaskIds = assignedOf(u); });
+
+  return { meta: { jwtSecret: crypto.randomBytes(32).toString("hex") }, users, boards };
+}
+
+/* ============================================================
+   POMOCNÍCI
+   ============================================================ */
+const findUser = (id) => DOC.users.find((u) => u.id === id);
+const findUserByName = (n) => DOC.users.find((u) => u.username.toLowerCase() === String(n || "").toLowerCase());
+const findBoard = (id) => DOC.boards.find((b) => b.id === id);
+function findCard(cardId) {
+  for (const b of DOC.boards) for (const l of b.lists) { const c = l.cards.find((x) => x.id === cardId); if (c) return { board: b, list: l, card: c }; }
+  return null;
+}
+function findList(listId) {
+  for (const b of DOC.boards) { const l = b.lists.find((x) => x.id === listId); if (l) return { board: b, list: l }; }
+  return null;
+}
+const isAdmin = (u) => u.role === "admin";
+const canSeeBoard = (u, b) => isAdmin(u) || !!u.access[b.id];
+const listHidden = (u, b, l) => !isAdmin(u) && u.access[b.id] && (u.access[b.id].hidden || []).includes(l.id);
+const canSeeList = (u, b, l) => canSeeBoard(u, b) && !listHidden(u, b, l) && !l.archived;
+const canEditCard = (u, b, l, c) => isAdmin(u) || (canSeeBoard(u, b) && !listHidden(u, b, l)) || c.memberIds.includes(u.id);
+
+function sanitizeUser(u) { return { id: u.id, username: u.username, name: u.name, role: u.role, color: u.color, access: u.access }; }
+
+const DUE_BUCKETS = [
+  { key: "overdue", title: "Po termínu" },
+  { key: "soon", title: "Tento týden" },
+  { key: "later", title: "Později" },
+  { key: "none", title: "Bez termínu" },
+  { key: "done", title: "Hotovo" },
+];
+function dueBucket(due) {
+  if (!due) return "none";
+  if (due.done) return "done";
+  const diff = due.date - Date.now();
+  if (diff < 0) return "overdue";
+  if (diff < 7 * 864e5) return "soon";
+  return "later";
+}
+
+function buildMyTasks(u) {
+  const byBucket = {}; DUE_BUCKETS.forEach((b) => byBucket[b.key] = []);
+  const labelsById = {};
+  DOC.boards.forEach((b) => { if (b.archived) return;
+    b.lists.forEach((l) => { if (l.archived) return;
+      l.cards.forEach((c) => {
+        if (c.archived || !c.memberIds.includes(u.id)) return;
+        (c.labelIds || []).forEach((id) => { const lab = b.labels.find((x) => x.id === id); if (lab) labelsById[id] = lab; });
+        const copy = JSON.parse(JSON.stringify(c));
+        copy._origin = { boardId: b.id, boardTitle: b.title, listId: l.id, listTitle: l.title };
+        byBucket[dueBucket(c.due)].push(copy);
+      });
+    });
+  });
+  const lists = DUE_BUCKETS.filter((b) => byBucket[b.key].length).map((b) => ({ id: "__mt_" + b.key, title: b.title, archived: false, collapsed: false, cards: byBucket[b.key] }));
+  return { id: "__mytasks__", title: "Moje úkoly", bg: { type: "gradient", value: "linear-gradient(135deg,#334155,#475569)" }, starred: false, archived: false, virtual: true, labels: Object.values(labelsById), activity: [], lists };
+}
+
+function filterStateFor(u) {
+  const boards = [buildMyTasks(u)];
+  DOC.boards.filter((b) => !b.archived && canSeeBoard(u, b)).forEach((b) => {
+    boards.push({
+      id: b.id, title: b.title, bg: b.bg, starred: b.starred, archived: false, labels: b.labels, activity: b.activity,
+      lists: b.lists.filter((l) => !l.archived && !listHidden(u, b, l)).map((l) => JSON.parse(JSON.stringify(l))),
+    });
+  });
+  const members = DOC.users.map((x) => ({ id: x.id, name: x.name, color: x.color }));
+  const validNew = (u.newTaskIds || []).filter((id) => { const f = findCard(id); return f && f.card.memberIds.includes(u.id) && !f.card.archived; });
+  const me = { id: u.id, username: u.username, name: u.name, role: u.role, color: u.color, theme: u.theme || "light", access: u.access, newTaskCount: validNew.length, newTaskIds: validNew };
+  const out = { me, state: { activeMemberId: u.id, theme: u.theme || "light", members, boards } };
+  if (isAdmin(u)) {
+    out.users = DOC.users.map(sanitizeUser);
+    out.allBoards = DOC.boards.filter((b) => !b.archived).map((b) => ({ id: b.id, title: b.title, lists: b.lists.filter((l) => !l.archived).map((l) => ({ id: l.id, title: l.title })) }));
+  }
+  return out;
+}
+
+/* přiřazení → upozornění */
+function noteAssignments(card, prevIds, actorId) {
+  const added = card.memberIds.filter((id) => !prevIds.includes(id));
+  added.forEach((id) => { if (id === actorId) return; const u = findUser(id); if (u && !u.newTaskIds.includes(card.id)) u.newTaskIds.push(card.id); });
+}
+
+/* ============================================================
+   SSE (živé změny)
+   ============================================================ */
+const sseClients = new Set();
+function broadcast(originator) {
+  version++;
+  const payload = `data: ${JSON.stringify({ version, originator: originator || null })}\n\n`;
+  for (const res of sseClients) { try { res.write(payload); } catch (e) {} }
+}
+
+/* ============================================================
+   AUTH
+   ============================================================ */
+function authFromReq(req) {
+  const tok = req.cookies && req.cookies.tok;
+  if (!tok) return null;
+  try { const p = jwt.verify(tok, DOC.meta.jwtSecret); return findUser(p.uid) || null; } catch (e) { return null; }
+}
+function requireAuth(req, res, next) { const u = authFromReq(req); if (!u) return res.status(401).json({ error: "unauthorized" }); req.user = u; next(); }
+function requireAdmin(req, res, next) { if (!isAdmin(req.user)) return res.status(403).json({ error: "forbidden" }); next(); }
+
+function respond(req, res) { broadcast(req.header("x-client-id")); persist(); res.json(filterStateFor(req.user)); }
+
+app.post("/api/login", (req, res) => {
+  const { username, password } = req.body || {};
+  const u = findUserByName(username);
+  if (!u || !bcrypt.compareSync(String(password || ""), u.passwordHash)) return res.status(401).json({ error: "bad_credentials" });
+  const tok = jwt.sign({ uid: u.id }, DOC.meta.jwtSecret, { expiresIn: "30d" });
+  res.cookie("tok", tok, { httpOnly: true, sameSite: "lax", maxAge: 30 * 864e5 });
+  res.json(filterStateFor(u));
+});
+app.post("/api/logout", (req, res) => { res.clearCookie("tok"); res.json({ ok: true }); });
+app.get("/api/state", requireAuth, (req, res) => res.json(filterStateFor(req.user)));
+
+app.get("/api/events", requireAuth, (req, res) => {
+  res.set({ "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
+  res.flushHeaders && res.flushHeaders();
+  res.write(`data: ${JSON.stringify({ version })}\n\n`);
+  sseClients.add(res);
+  const hb = setInterval(() => { try { res.write(": hb\n\n"); } catch (e) {} }, 25000);
+  req.on("close", () => { clearInterval(hb); sseClients.delete(res); });
+});
+
+/* ============================================================
+   ÚČET
+   ============================================================ */
+app.post("/api/account/theme", requireAuth, (req, res) => { req.user.theme = req.body.theme === "dark" ? "dark" : "light"; persist(); res.json({ ok: true }); });
+app.post("/api/account/seen", requireAuth, (req, res) => { req.user.newTaskIds = []; persist(); res.json(filterStateFor(req.user)); });
+app.post("/api/account/password", requireAuth, (req, res) => {
+  const { current, next } = req.body || {};
+  if (!bcrypt.compareSync(String(current || ""), req.user.passwordHash)) return res.status(400).json({ error: "bad_current" });
+  if (!next || String(next).length < 4) return res.status(400).json({ error: "weak" });
+  req.user.passwordHash = bcrypt.hashSync(String(next), 10); persist(); res.json({ ok: true });
+});
+
+/* ============================================================
+   NÁSTĚNKY (struktura — admin)
+   ============================================================ */
+app.post("/api/boards", requireAuth, requireAdmin, (req, res) => {
+  const { title, bg } = req.body || {};
+  const labels = LABELS_DEF.map(([name, color]) => ({ id: uid(), name, color }));
+  DOC.boards.push({ id: uid(), title: (title || "Nová nástěnka").trim(), bg: bg || { type: "color", value: "#3d4f6d" }, starred: false, archived: false, labels, activity: [], lists: [] });
+  respond(req, res);
+});
+app.patch("/api/boards/:id", requireAuth, requireAdmin, (req, res) => {
+  const b = findBoard(req.params.id); if (!b) return res.status(404).json({ error: "not_found" });
+  const { title, bg, starred } = req.body || {};
+  if (title !== undefined) b.title = String(title).trim() || b.title;
+  if (bg !== undefined) b.bg = bg;
+  if (starred !== undefined) b.starred = !!starred;
+  respond(req, res);
+});
+app.delete("/api/boards/:id", requireAuth, requireAdmin, (req, res) => {
+  DOC.boards = DOC.boards.filter((b) => b.id !== req.params.id);
+  DOC.users.forEach((u) => { delete u.access[req.params.id]; });
+  respond(req, res);
+});
+app.post("/api/boards/:id/archive", requireAuth, requireAdmin, (req, res) => {
+  const b = findBoard(req.params.id); if (b) b.archived = true; respond(req, res);
+});
+
+/* ---------- Seznamy (struktura — admin) ---------- */
+app.post("/api/boards/:id/lists", requireAuth, requireAdmin, (req, res) => {
+  const b = findBoard(req.params.id); if (!b) return res.status(404).json({ error: "not_found" });
+  b.lists.push({ id: uid(), title: (req.body.title || "Nový seznam").trim(), archived: false, collapsed: false, cards: [] });
+  respond(req, res);
+});
+app.patch("/api/lists/:id", requireAuth, (req, res) => {
+  const f = findList(req.params.id); if (!f) return res.status(404).json({ error: "not_found" });
+  const admin = isAdmin(req.user);
+  const { title, archived, collapsed } = req.body || {};
+  if (collapsed !== undefined) f.list.collapsed = !!collapsed; // kolaps smí kdokoli kdo vidí
+  if (admin) {
+    if (title !== undefined) f.list.title = String(title).trim() || f.list.title;
+    if (archived !== undefined) f.list.archived = !!archived;
+  } else if (title !== undefined || archived !== undefined) { return res.status(403).json({ error: "forbidden" }); }
+  respond(req, res);
+});
+app.post("/api/lists/:id/sort", requireAuth, (req, res) => {
+  const f = findList(req.params.id); if (!f || !canSeeList(req.user, f.board, f.list)) return res.status(403).json({ error: "forbidden" });
+  const by = req.body.by;
+  const act = f.list.cards.filter((c) => !c.archived), arch = f.list.cards.filter((c) => c.archived);
+  if (by === "name") act.sort((a, b) => a.title.localeCompare(b.title, "cs"));
+  else if (by === "due") act.sort((a, b) => (a.due ? a.due.date : Infinity) - (b.due ? b.due.date : Infinity));
+  else act.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  f.list.cards = act.concat(arch); respond(req, res);
+});
+app.post("/api/lists/:id/archive-cards", requireAuth, requireAdmin, (req, res) => {
+  const f = findList(req.params.id); if (f) f.list.cards.forEach((c) => c.archived = true); respond(req, res);
+});
+app.post("/api/lists/:id/copy", requireAuth, requireAdmin, (req, res) => {
+  const f = findList(req.params.id); if (!f) return res.status(404).json({ error: "not_found" });
+  const copy = JSON.parse(JSON.stringify(f.list)); copy.id = uid(); copy.title = f.list.title + " (kopie)"; copy.cards.forEach((c) => c.id = uid());
+  const idx = f.board.lists.indexOf(f.list); f.board.lists.splice(idx + 1, 0, copy); respond(req, res);
+});
+
+/* ---------- Karty ---------- */
+app.post("/api/lists/:id/cards", requireAuth, (req, res) => {
+  const f = findList(req.params.id); if (!f) return res.status(404).json({ error: "not_found" });
+  if (!canSeeList(req.user, f.board, f.list)) return res.status(403).json({ error: "forbidden" });
+  const title = String(req.body.title || "").trim(); if (!title) return res.status(400).json({ error: "empty" });
+  const c = { id: uid(), title, desc: "", archived: false, labelIds: [], memberIds: [], due: null, start: null, cover: null, checklists: [], attachments: [], comments: [], createdAt: Date.now() };
+  f.list.cards.push(c); respond(req, res);
+});
+app.put("/api/cards/:id", requireAuth, (req, res) => {
+  const f = findCard(req.params.id); if (!f) return res.status(404).json({ error: "not_found" });
+  if (!canEditCard(req.user, f.board, f.list, f.card)) return res.status(403).json({ error: "forbidden" });
+  const body = req.body || {}; const prevMembers = f.card.memberIds.slice();
+  const allowed = ["title", "desc", "labelIds", "memberIds", "due", "start", "cover", "checklists", "attachments", "comments", "archived"];
+  allowed.forEach((k) => { if (body[k] !== undefined) f.card[k] = body[k]; });
+  if (body.memberIds !== undefined) noteAssignments(f.card, prevMembers, req.user.id);
+  respond(req, res);
+});
+app.delete("/api/cards/:id", requireAuth, (req, res) => {
+  const f = findCard(req.params.id); if (!f) return res.status(404).json({ error: "not_found" });
+  if (!canEditCard(req.user, f.board, f.list, f.card)) return res.status(403).json({ error: "forbidden" });
+  f.list.cards = f.list.cards.filter((c) => c.id !== req.params.id); respond(req, res);
+});
+app.post("/api/cards/:id/copy", requireAuth, (req, res) => {
+  const f = findCard(req.params.id); if (!f) return res.status(404).json({ error: "not_found" });
+  if (!canSeeList(req.user, f.board, f.list)) return res.status(403).json({ error: "forbidden" });
+  const copy = JSON.parse(JSON.stringify(f.card)); copy.id = uid();
+  copy.title = String(req.body.title || f.card.title).trim() || f.card.title;
+  copy.comments = []; copy.createdAt = Date.now();
+  (copy.checklists || []).forEach((cl) => { cl.id = uid(); (cl.items || []).forEach((i) => i.id = uid()); });
+  (copy.attachments || []).forEach((a) => a.id = uid());
+  const idx = f.list.cards.findIndex((c) => c.id === f.card.id);
+  f.list.cards.splice(idx + 1, 0, copy); respond(req, res);
+});
+app.post("/api/cards/:id/move", requireAuth, (req, res) => {
+  const f = findCard(req.params.id); if (!f) return res.status(404).json({ error: "not_found" });
+  const dest = findList(req.body.toListId); if (!dest) return res.status(404).json({ error: "dest_not_found" });
+  if (!canEditCard(req.user, f.board, f.list, f.card) || !canSeeList(req.user, dest.board, dest.list)) return res.status(403).json({ error: "forbidden" });
+  f.list.cards = f.list.cards.filter((c) => c.id !== f.card.id);
+  const idx = Math.max(0, Math.min(dest.list.cards.length, req.body.index == null ? dest.list.cards.length : req.body.index));
+  dest.list.cards.splice(idx, 0, f.card); respond(req, res);
+});
+
+/* reorder (DnD commit) — viditelné seznamy nástěnky */
+app.post("/api/boards/:id/reorder", requireAuth, (req, res) => {
+  const b = findBoard(req.params.id); if (!b || !canSeeBoard(req.user, b)) return res.status(403).json({ error: "forbidden" });
+  const { listOrder, placements } = req.body || {};
+  const byId = {}; b.lists.forEach((l) => l.cards.forEach((c) => { byId[c.id] = c; }));
+  // placement karet ve viditelných seznamech
+  if (placements) {
+    Object.keys(placements).forEach((lid) => {
+      const l = b.lists.find((x) => x.id === lid); if (!l || !canSeeList(req.user, b, l)) return;
+      const archived = l.cards.filter((c) => c.archived);
+      l.cards = placements[lid].map((id) => byId[id]).filter(Boolean).concat(archived);
+    });
+  }
+  // pořadí viditelných seznamů (skryté/archivované zůstanou na místě)
+  if (listOrder && isAdmin(req.user)) {
+    const archived = b.lists.filter((l) => l.archived);
+    const active = listOrder.map((id) => b.lists.find((l) => l.id === id && !l.archived)).filter(Boolean);
+    const seen = new Set(active.map((l) => l.id));
+    b.lists.filter((l) => !l.archived && !seen.has(l.id)).forEach((l) => active.push(l));
+    b.lists = active.concat(archived);
+  }
+  respond(req, res);
+});
+
+/* ---------- Štítky (admin) ---------- */
+app.post("/api/boards/:id/labels", requireAuth, requireAdmin, (req, res) => {
+  const b = findBoard(req.params.id); if (!b) return res.status(404).json({ error: "not_found" });
+  b.labels.push({ id: uid(), name: (req.body.name || "").trim(), color: req.body.color || "#4c6793" }); respond(req, res);
+});
+app.patch("/api/boards/:bid/labels/:id", requireAuth, requireAdmin, (req, res) => {
+  const b = findBoard(req.params.bid); if (!b) return res.status(404).json({ error: "not_found" });
+  const lab = b.labels.find((l) => l.id === req.params.id); if (!lab) return res.status(404).json({ error: "no_label" });
+  if (req.body.name !== undefined) lab.name = String(req.body.name).trim();
+  if (req.body.color !== undefined) lab.color = req.body.color; respond(req, res);
+});
+app.delete("/api/boards/:bid/labels/:id", requireAuth, requireAdmin, (req, res) => {
+  const b = findBoard(req.params.bid); if (!b) return res.status(404).json({ error: "not_found" });
+  b.labels = b.labels.filter((l) => l.id !== req.params.id);
+  b.lists.forEach((l) => l.cards.forEach((c) => c.labelIds = (c.labelIds || []).filter((x) => x !== req.params.id)));
+  respond(req, res);
+});
+
+/* ============================================================
+   SPRÁVA UŽIVATELŮ (admin)
+   ============================================================ */
+app.post("/api/users", requireAuth, requireAdmin, (req, res) => {
+  const { username, name, password, role } = req.body || {};
+  if (!username || findUserByName(username)) return res.status(400).json({ error: "username_taken" });
+  if (!password || String(password).length < 4) return res.status(400).json({ error: "weak" });
+  const u = { id: uid(), username: String(username).trim().toLowerCase(), passwordHash: bcrypt.hashSync(String(password), 10),
+    name: (name || username).trim(), role: role === "admin" ? "admin" : "manager", color: AVATAR_COLORS[DOC.users.length % AVATAR_COLORS.length], theme: "light", access: {}, newTaskIds: [] };
+  DOC.users.push(u); respond(req, res);
+});
+app.patch("/api/users/:id", requireAuth, requireAdmin, (req, res) => {
+  const u = findUser(req.params.id); if (!u) return res.status(404).json({ error: "not_found" });
+  const { name, role, access, color } = req.body || {};
+  if (name !== undefined) u.name = String(name).trim() || u.name;
+  if (color !== undefined) u.color = color;
+  if (role !== undefined && u.id !== req.user.id) u.role = role === "admin" ? "admin" : "manager";
+  if (access !== undefined) u.access = access;
+  respond(req, res);
+});
+app.delete("/api/users/:id", requireAuth, requireAdmin, (req, res) => {
+  if (req.params.id === req.user.id) return res.status(400).json({ error: "self" });
+  const u = findUser(req.params.id); if (!u) return res.status(404).json({ error: "not_found" });
+  DOC.users = DOC.users.filter((x) => x.id !== req.params.id);
+  DOC.boards.forEach((b) => b.lists.forEach((l) => l.cards.forEach((c) => c.memberIds = c.memberIds.filter((m) => m !== req.params.id))));
+  respond(req, res);
+});
+app.post("/api/users/:id/password", requireAuth, requireAdmin, (req, res) => {
+  const u = findUser(req.params.id); if (!u) return res.status(404).json({ error: "not_found" });
+  if (!req.body.password || String(req.body.password).length < 4) return res.status(400).json({ error: "weak" });
+  u.passwordHash = bcrypt.hashSync(String(req.body.password), 10); persist(); res.json({ ok: true });
+});
+
+/* reset ukázkových dat (admin) — vytvoří nový dokument, je nutné se znovu přihlásit */
+app.post("/api/reset-sample", requireAuth, requireAdmin, (req, res) => {
+  DOC = seed(); broadcast(null); storage.set(DOC);
+  res.clearCookie("tok"); res.json({ ok: true, reload: true });
+});
+
 app.get("/api/health", (req, res) => res.json({ ok: true }));
-
-app.get("/api/state", async (req, res) => {
-  try {
-    await storage.ready;
-    const data = await storage.get();
-    res.json({ data: data || null });
-  } catch (e) {
-    console.error("GET /api/state", e);
-    res.status(500).json({ error: "read_failed" });
-  }
-});
-
-app.put("/api/state", async (req, res) => {
-  try {
-    await storage.ready;
-    const data = req.body && req.body.data;
-    if (!data || typeof data !== "object") return res.status(400).json({ error: "bad_payload" });
-    await storage.set(data);
-    res.json({ ok: true });
-  } catch (e) {
-    console.error("PUT /api/state", e);
-    res.status(500).json({ error: "write_failed" });
-  }
-});
-
-/* SPA fallback */
 app.get("*", (req, res) => res.sendFile(path.join(__dirname, "public", "index.html")));
 
-app.listen(PORT, () => console.log(`Trellite Pro běží na portu ${PORT}`));
+loadDoc().then(() => {
+  app.listen(PORT, () => console.log(`Trellite Pro běží na portu ${PORT}`));
+}).catch((e) => { console.error("Start selhal:", e); process.exit(1); });

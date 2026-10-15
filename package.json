@@ -1,7 +1,7 @@
 {
   "name": "trellite-pro",
-  "version": "1.0.0",
-  "description": "Trello-style kanban aplikace (česky) s Node/Express backendem a Postgres databází.",
+  "version": "2.0.0",
+  "description": "Víceuživatelská Trello-style aplikace (česky) s rolemi, oprávněními, přiřazováním úkolů a živou synchronizací. Node/Express + PostgreSQL.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
@@ -10,7 +10,10 @@
     "node": ">=18"
   },
   "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cookie-parser": "^1.4.6",
     "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2",
     "pg": "^8.11.5"
   },
   "license": "MIT"

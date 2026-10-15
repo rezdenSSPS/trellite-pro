@@ -10,6 +10,20 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
+  <!-- Přihlášení -->
+  <div id="loginView" class="login-view" hidden>
+    <form id="loginForm" class="login-card">
+      <div class="login-logo">Trellite<span class="logo-pro">PRO</span></div>
+      <div class="login-sub">Přihlášení do systému úkolů</div>
+      <input id="loginUser" class="login-input" placeholder="Uživatelské jméno" autocomplete="username" />
+      <input id="loginPass" class="login-input" type="password" placeholder="Heslo" autocomplete="current-password" />
+      <div id="loginError" class="login-error" hidden></div>
+      <button type="submit" class="login-btn">Přihlásit se</button>
+      <div class="login-hint">Výchozí admin: <b>admin</b> / <b>admin123</b></div>
+    </form>
+  </div>
+
+  <div id="appWrap" hidden>
   <header class="topbar">
     <div class="topbar-left">
       <button id="homeBtn" class="icon-btn" title="Nástěnky" aria-label="Nástěnky">
@@ -33,30 +47,44 @@
         <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h18l-7 8v5l-4 2v-7z"/></svg>
         <span id="filterLabel">Filtr</span>
       </button>
+      <button id="tasksBtn" class="pill-btn" title="Moje úkoly">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M8 12.2l2.6 2.6L16 9.4"/></svg>
+        <span>Moje úkoly</span>
+        <span id="taskBadge" class="task-badge" hidden>0</span>
+      </button>
       <button id="themeBtn" class="icon-btn" title="Přepnout tmavý režim" aria-label="Přepnout tmavý režim">
         <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.5A8.5 8.5 0 1 1 11.5 3 6.5 6.5 0 0 0 21 12.5z"/></svg>
       </button>
       <button id="menuBtn" class="icon-btn" title="Menu nástěnky" aria-label="Menu nástěnky" hidden>
         <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>
       </button>
+      <button id="userBtn" class="user-btn" title="Účet"><span id="userAvatar" class="avatar sm"></span></button>
     </div>
   </header>
 
   <!-- Přehled nástěnek -->
   <main id="boardsView" class="boards-view">
+    <div id="adminBar" class="admin-bar" hidden></div>
     <section id="starredSection" hidden>
       <h2 class="section-title">★ Oblíbené nástěnky</h2>
       <div id="starredGrid" class="boards-grid"></div>
     </section>
-    <h2 class="section-title">Vaše nástěnky</h2>
+    <h2 class="section-title">Nástěnky</h2>
     <div id="boardsGrid" class="boards-grid"></div>
-    <button id="resetSampleBtn" class="reset-sample">↺ Obnovit ukázková data</button>
+    <button id="resetSampleBtn" class="reset-sample" hidden>↺ Obnovit ukázková data</button>
   </main>
 
   <!-- Jedna nástěnka -->
   <main id="boardView" class="board-view" hidden>
     <div id="lists" class="lists"></div>
-    <button id="addListBtn" class="add-list-btn">+ Přidat seznam</button>
+    <button id="addListBtn" class="add-list-btn" hidden>+ Přidat seznam</button>
+  </main>
+
+  <!-- Správa uživatelů (admin) -->
+  <main id="adminView" class="admin-view" hidden>
+    <h1 class="admin-title">Správa uživatelů</h1>
+    <div id="adminUsers"></div>
+    <button id="addUserBtn" class="pop-btn" style="max-width:220px">+ Přidat uživatele</button>
   </main>
 
   <!-- Detail karty -->
@@ -88,8 +116,9 @@
     </aside>
   </div>
 
-  <!-- Vyskakovací okno -->
   <div id="popover" class="popover" hidden></div>
+  <div id="toast" class="toast" hidden></div>
+  </div>
 
   <script src="app.js"></script>
 </body>

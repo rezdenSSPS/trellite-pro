@@ -353,6 +353,59 @@ html, body {
 }
 .reset-sample:hover { background: rgba(255,255,255,0.22); }
 
+/* ---------- Login ---------- */
+.login-view { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: var(--bg-grad), var(--bg); padding: 16px; z-index: 300; }
+.login-card { background: var(--surface-2); color: var(--text); width: 100%; max-width: 360px; border-radius: var(--radius-lg); padding: 28px 26px; box-shadow: var(--shadow-lg); display: flex; flex-direction: column; gap: 10px; border: 1px solid var(--border); }
+.login-logo { font-weight: 800; font-size: 24px; letter-spacing: -0.5px; text-align: center; }
+.login-logo .logo-pro { color: var(--muted); }
+.login-sub { text-align: center; color: var(--muted); font-size: 13px; margin-bottom: 10px; }
+.login-input { border: 1px solid var(--border-strong); border-radius: 8px; padding: 11px 12px; font-size: 14px; font-family: inherit; background: var(--card-bg); color: var(--text); outline: none; }
+.login-input:focus { box-shadow: inset 0 0 0 2px var(--accent); border-color: transparent; }
+.login-btn { background: var(--accent); color: var(--accent-ink); border: none; border-radius: 8px; padding: 12px; font-weight: 700; font-size: 14px; cursor: pointer; margin-top: 4px; }
+.login-btn:hover { filter: brightness(1.06); }
+.login-error { background: #c15f5b; color: #fff; border-radius: 7px; padding: 8px 10px; font-size: 13px; text-align: center; }
+.login-hint { text-align: center; color: var(--muted); font-size: 12px; margin-top: 8px; }
+
+/* ---------- User menu / task badge ---------- */
+.user-btn { background: transparent; border: none; cursor: pointer; padding: 0; margin-left: 2px; }
+.user-btn .avatar { box-shadow: 0 0 0 2px rgba(255,255,255,0.3); }
+.task-badge { background: #c15f5b; color: #fff; font-size: 11px; font-weight: 700; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; display: inline-flex; align-items: center; justify-content: center; }
+#tasksBtn { position: relative; }
+#tasksBtn .task-badge { margin-left: 2px; }
+.pop-user { padding: 6px 7px 10px; border-bottom: 1px solid var(--border); margin-bottom: 6px; }
+.board-card.mytasks { color: #fff; }
+.card-new { box-shadow: 0 0 0 2px #c15f5b, var(--shadow-sm); }
+.new-flag { display: inline-block; background: #c15f5b; color: #fff; font-size: 9px; font-weight: 800; letter-spacing: .5px; padding: 1px 5px; border-radius: 4px; margin-bottom: 5px; }
+.card-origin { font-size: 11px; color: var(--muted); margin-top: 3px; }
+
+/* ---------- Admin ---------- */
+.admin-bar { display: flex; gap: 10px; margin-bottom: 18px; }
+.admin-bar-btn { display: inline-flex; align-items: center; gap: 7px; background: rgba(255,255,255,0.14); color: #fff; border: 1px solid rgba(255,255,255,0.16); border-radius: 8px; padding: 9px 14px; cursor: pointer; font-weight: 600; font-size: 13.5px; font-family: inherit; }
+.admin-bar-btn:hover { background: rgba(255,255,255,0.24); }
+.admin-view { padding: 28px 32px 70px; max-width: 920px; margin: 0 auto; }
+.admin-title { color: #fff; font-size: 22px; margin: 4px 0 20px; }
+.admin-user { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 16px 18px; margin-bottom: 14px; box-shadow: var(--shadow); }
+.admin-user-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.admin-user-name { font-weight: 700; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+.admin-user-login { color: var(--muted); font-size: 12.5px; }
+.admin-role { font-size: 10px; text-transform: uppercase; font-weight: 800; letter-spacing: .5px; padding: 2px 7px; border-radius: 5px; }
+.admin-role.admin { background: var(--accent); color: var(--accent-ink); }
+.admin-role.manager { background: rgba(23,32,51,0.1); color: var(--muted); }
+:root[data-theme="dark"] .admin-role.manager { background: rgba(255,255,255,0.1); }
+.admin-access { margin-top: 14px; border-top: 1px solid var(--border); padding-top: 12px; }
+.admin-access-title { font-size: 12px; font-weight: 700; color: var(--muted); margin-bottom: 8px; }
+.admin-board-access { margin-bottom: 8px; }
+.admin-check { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; font-size: 14px; cursor: pointer; }
+.admin-check input { width: 16px; height: 16px; accent-color: var(--accent); }
+.admin-list-hide { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 4px 24px; }
+.admin-hide-chip { display: inline-flex; align-items: center; gap: 5px; background: rgba(23,32,51,0.05); border: 1px solid var(--border); border-radius: 20px; padding: 4px 10px; font-size: 12.5px; cursor: pointer; }
+:root[data-theme="dark"] .admin-hide-chip { background: rgba(255,255,255,0.05); }
+.admin-hide-chip.hidden { opacity: 0.5; }
+.admin-hide-chip input { width: 14px; height: 14px; accent-color: var(--accent); }
+
+/* ---------- Toast ---------- */
+.toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #22272f; color: #fff; padding: 11px 18px; border-radius: 10px; font-size: 13.5px; font-weight: 500; box-shadow: var(--shadow-lg); z-index: 400; max-width: 90vw; }
+
 .empty-note { color: var(--muted); font-size: 13px; padding: 10px 4px; }
 .scope-note { color: var(--muted); font-size: 11.5px; margin-top: 20px; line-height: 1.6; padding: 12px; background: rgba(23,32,51,0.04); border-radius: 8px; }
 :root[data-theme="dark"] .scope-note { background: rgba(255,255,255,0.04); }
