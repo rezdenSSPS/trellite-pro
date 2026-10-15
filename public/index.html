@@ -6,21 +6,49 @@
   <title>Trellite Pro</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@500&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <!-- Přihlášení -->
   <div id="loginView" class="login-view" hidden>
-    <form id="loginForm" class="login-card">
-      <div class="login-logo">Trellite<span class="logo-pro">PRO</span></div>
-      <div class="login-sub">Přihlášení do systému úkolů</div>
-      <input id="loginUser" class="login-input" placeholder="Uživatelské jméno" autocomplete="username" />
-      <input id="loginPass" class="login-input" type="password" placeholder="Heslo" autocomplete="current-password" />
-      <div id="loginError" class="login-error" hidden></div>
-      <button type="submit" class="login-btn">Přihlásit se</button>
-      <div class="login-hint">Výchozí admin: <b>admin</b> / <b>admin123</b></div>
-    </form>
+    <main class="login-main">
+      <div class="login-brand"><span class="logo-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><rect x="4" y="4" width="6" height="14" rx="1.5"/><rect x="14" y="4" width="6" height="9" rx="1.5"/></svg></span>Trellite</div>
+      <div class="login-center">
+        <form id="loginForm" class="login-card">
+          <div class="login-head">
+            <h1 class="login-logo">Vítej zpět</h1>
+            <p class="login-sub">Přihlas se ke svému týmovému prostoru.</p>
+          </div>
+          <label class="login-field">Uživatelské jméno
+            <input id="loginUser" class="login-input" autocomplete="username" />
+          </label>
+          <label class="login-field">Heslo
+            <input id="loginPass" class="login-input" type="password" autocomplete="current-password" />
+          </label>
+          <div id="loginError" class="login-error" hidden></div>
+          <button type="submit" class="login-btn">Přihlásit se</button>
+          <div class="login-hint">Výchozí admin: <b>admin</b> / <b>admin123</b></div>
+        </form>
+      </div>
+    </main>
+    <aside class="login-aside" aria-hidden="true">
+      <div>
+        <h2>Celý tým na jedné nástěnce.</h2>
+        <p style="margin-top:12px">Karty, termíny a úkoly se synchronizují živě. Každý vidí jen to, k čemu má oprávnění.</p>
+      </div>
+      <div class="login-preview">
+        <div class="lp-list">
+          <div class="lp-head"><span class="lp-dot"></span>Probíhá</div>
+          <div class="lp-card"><span class="lp-tag dev">Vývoj</span>Přihlášení uživatelů<div class="lp-bar"><span></span></div></div>
+          <div class="lp-card"><span class="lp-tag">Design</span>Nová úvodní stránka</div>
+        </div>
+        <div class="lp-list">
+          <div class="lp-head"><span class="lp-dot ok"></span>Hotovo</div>
+          <div class="lp-card">Nasazení na server<span class="lp-meta">6/6</span></div>
+        </div>
+      </div>
+    </aside>
   </div>
 
   <div id="appWrap" hidden>
@@ -29,7 +57,7 @@
       <button id="homeBtn" class="icon-btn" title="Nástěnky" aria-label="Nástěnky">
         <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg>
       </button>
-      <span class="logo">Trellite<span class="logo-pro">PRO</span></span>
+      <span class="logo"><span class="logo-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><rect x="4" y="4" width="6" height="14" rx="1.5"/><rect x="14" y="4" width="6" height="9" rx="1.5"/></svg></span><span class="logo-text">Trellite</span><span class="logo-pro">PRO</span></span>
       <span id="syncDot" class="sync-dot" title="Stav připojení"></span>
     </div>
     <div class="topbar-center">
@@ -66,12 +94,12 @@
   <main id="boardsView" class="boards-view">
     <div id="adminBar" class="admin-bar" hidden></div>
     <section id="starredSection" hidden>
-      <h2 class="section-title">★ Oblíbené nástěnky</h2>
+      <h2 class="section-title">Oblíbené nástěnky</h2>
       <div id="starredGrid" class="boards-grid"></div>
     </section>
     <h2 class="section-title">Nástěnky</h2>
     <div id="boardsGrid" class="boards-grid"></div>
-    <button id="resetSampleBtn" class="reset-sample" hidden>↺ Obnovit ukázková data</button>
+    <button id="resetSampleBtn" class="reset-sample" hidden>Obnovit ukázková data</button>
   </main>
 
   <!-- Jedna nástěnka -->
