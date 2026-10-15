@@ -86,11 +86,10 @@ function seed() {
     id: uid(), username, passwordHash: bcrypt.hashSync(role === "admin" ? "admin123" : "heslo123", 10),
     name, role, color: AVATAR_COLORS[ci % AVATAR_COLORS.length], theme: "light", access: {}, newTaskIds: [],
   });
-  const admin = mkUser("admin", "Admin", "admin", 0);
-  const petra = mkUser("petra", "Petra Nováková", "manager", 1);
-  const jan = mkUser("jan", "Jan Svoboda", "manager", 2);
-  const eva = mkUser("eva", "Eva Dvořáková", "manager", 3);
-  const users = [admin, petra, jan, eva];
+  const denis = mkUser("denis", "Denis", "admin", 0);
+  const miroslav = mkUser("miroslav", "Miroslav", "admin", 4);
+  const daniel = mkUser("daniel", "Daniel", "manager", 2);
+  const users = [denis, miroslav, daniel];
 
   const boards = [];
   const boardByCity = {};
@@ -112,44 +111,42 @@ function seed() {
   // Mělník
   {
     const b = boardByCity["Mělník"]; const lab = L(b);
-    listByName(b, "Vozidla").cards.push(card("Servis vozu 5809", { labels: [lab["Urgentní"]], members: [petra.id], due: { date: days(3), done: false }, desc: "Pravidelný servis + výměna oleje." }));
-    listByName(b, "Zaměstnanci").cards.push(card("Doplnit směny na víkend", { labels: [lab["Běžné"]], members: [petra.id], due: { date: days(1), done: false } }));
+    listByName(b, "Vozidla").cards.push(card("Servis vozu 5809", { labels: [lab["Urgentní"]], members: [daniel.id], due: { date: days(3), done: false }, desc: "Pravidelný servis + výměna oleje." }));
+    listByName(b, "Zaměstnanci").cards.push(card("Doplnit směny na víkend", { labels: [lab["Běžné"]], members: [daniel.id], due: { date: days(1), done: false } }));
     listByName(b, "Restaurace").cards.push(card("Kontrola skladu – restaurace náměstí", { labels: [lab["Info"]] }));
-    listByName(b, "Problémy").cards.push(card("Rozbité topení v provozovně", { labels: [lab["Problém"]], members: [petra.id], due: { date: days(-1), done: false } }));
+    listByName(b, "Problémy").cards.push(card("Rozbité topení v provozovně", { labels: [lab["Problém"]], members: [daniel.id], due: { date: days(-1), done: false } }));
   }
   // Neratovice
   {
     const b = boardByCity["Neratovice"]; const lab = L(b);
-    listByName(b, "Nábory").cards.push(card("Nábor – brigádník na léto", { labels: [lab["Běžné"]], members: [petra.id] }));
-    listByName(b, "Aktuální úkoly").cards.push(card("Předat podklady pro fakturaci", { labels: [lab["Čeká"]], members: [petra.id], due: { date: days(5), done: false } }));
+    listByName(b, "Nábory").cards.push(card("Nábor – brigádník na léto", { labels: [lab["Běžné"]], members: [daniel.id] }));
+    listByName(b, "Aktuální úkoly").cards.push(card("Předat podklady pro fakturaci", { labels: [lab["Čeká"]], members: [daniel.id], due: { date: days(5), done: false } }));
   }
   // Benešov
   {
     const b = boardByCity["Benešov"]; const lab = L(b);
-    listByName(b, "Problémy").cards.push(card("Stížnost zákazníka – objednávka #2231", { labels: [lab["Problém"]], members: [jan.id], due: { date: days(2), done: false }, comments: [cm(jan.id, "Zavolám zákazníkovi zítra.", 5)] }));
-    listByName(b, "Vozidla").cards.push(card("Přezout pneumatiky – dodávka", { labels: [lab["Běžné"]], members: [jan.id] }));
+    listByName(b, "Problémy").cards.push(card("Stížnost zákazníka – objednávka #2231", { labels: [lab["Problém"]], members: [miroslav.id], due: { date: days(2), done: false }, comments: [cm(miroslav.id, "Zavolám zákazníkovi zítra.", 5)] }));
+    listByName(b, "Vozidla").cards.push(card("Přezout pneumatiky – dodávka", { labels: [lab["Běžné"]], members: [daniel.id] }));
   }
   // Vlašim
   {
     const b = boardByCity["Vlašim"]; const lab = L(b);
-    listByName(b, "Zaměstnanci").cards.push(card("Školení BOZP", { labels: [lab["Info"]], members: [jan.id], due: { date: days(7), done: false } }));
+    listByName(b, "Zaměstnanci").cards.push(card("Školení BOZP", { labels: [lab["Info"]], members: [daniel.id], due: { date: days(7), done: false } }));
   }
   // Krumlov
   {
     const b = boardByCity["Krumlov"]; const lab = L(b);
-    listByName(b, "Restaurace").cards.push(card("Nové menu – návrh", { labels: [lab["Běžné"]], members: [eva.id], due: { date: days(4), done: false } }));
-    listByName(b, "Aktuální úkoly").cards.push(card("Objednat ubrusy", { labels: [lab["Čeká"]], members: [eva.id] }));
+    listByName(b, "Restaurace").cards.push(card("Nové menu – návrh", { labels: [lab["Běžné"]], members: [daniel.id], due: { date: days(4), done: false } }));
+    listByName(b, "Aktuální úkoly").cards.push(card("Objednat ubrusy", { labels: [lab["Čeká"]], members: [daniel.id] }));
   }
 
   // Oprávnění managerů
   const grant = (user, city, hidden = []) => { const b = boardByCity[city]; user.access[b.id] = { hidden: hidden.map((n) => listByName(b, n).id) }; };
-  grant(petra, "Mělník"); grant(petra, "Neratovice");
-  grant(jan, "Benešov", ["Nábory"]); grant(jan, "Vlašim");
-  grant(eva, "Krumlov");
+  Object.keys(CITY_BGS).forEach((city) => grant(daniel, city));
 
   // Počáteční upozornění (nové přiřazené úkoly)
   const assignedOf = (u) => { const ids = []; boards.forEach((b) => b.lists.forEach((l) => l.cards.forEach((c) => { if (c.memberIds.includes(u.id)) ids.push(c.id); }))); return ids; };
-  [petra, jan, eva].forEach((u) => { u.newTaskIds = assignedOf(u); });
+  [daniel, miroslav].forEach((u) => { u.newTaskIds = assignedOf(u); });
 
   return { meta: { jwtSecret: crypto.randomBytes(32).toString("hex") }, users, boards };
 }

@@ -691,6 +691,9 @@ function renderAdmin() {
     const info = document.createElement("div"); info.style.flex = "1";
     info.innerHTML = `<div class="admin-user-name">${escapeHtml(u.name)} <span class="admin-role ${u.role}">${u.role === "admin" ? "admin" : "manažer"}</span></div><div class="admin-user-login">${escapeHtml(u.username)}</div>`;
     head.appendChild(info);
+    const ren = document.createElement("button"); ren.className = "pop-btn subtle"; ren.style.cssText = "width:auto;margin:0;padding:6px 10px"; ren.innerHTML = icon("edit", 15) + " Jméno";
+    ren.onclick = () => { const nn = prompt("Jméno uživatele:", u.name); if (nn && nn.trim() && nn.trim() !== u.name) mutate("PATCH", "/users/" + u.id, { name: nn.trim() }); };
+    head.appendChild(ren);
     const pw = document.createElement("button"); pw.className = "pop-btn subtle"; pw.style.cssText = "width:auto;margin:0;padding:6px 10px"; pw.innerHTML = icon("key", 15) + " Heslo";
     pw.onclick = () => { const np = prompt(`Nové heslo pro ${u.name}:`); if (np) api("POST", "/users/" + u.id + "/password", { password: np }).then(() => toast("Heslo změněno.")).catch(() => {}); };
     head.appendChild(pw);
