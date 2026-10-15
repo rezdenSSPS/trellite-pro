@@ -4,24 +4,41 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Trellite Pro</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <header class="topbar">
     <div class="topbar-left">
-      <button id="homeBtn" class="icon-btn" title="Nástěnky" aria-label="Nástěnky">⌂</button>
-      <span class="logo">Trellite<span class="logo-pro">Pro</span></span>
+      <button id="homeBtn" class="icon-btn" title="Nástěnky" aria-label="Nástěnky">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg>
+      </button>
+      <span class="logo">Trellite<span class="logo-pro">PRO</span></span>
       <span id="syncDot" class="sync-dot" title="Stav připojení"></span>
     </div>
     <div class="topbar-center">
-      <span id="boardStar" class="board-star" title="Přidat k oblíbeným" hidden>☆</span>
+      <button id="boardStar" class="board-star" title="Přidat k oblíbeným" hidden>
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.5 9.7l5.9-.9z"/></svg>
+      </button>
       <span id="boardTitle" class="board-title" contenteditable="false"></span>
     </div>
     <div class="topbar-right">
-      <input id="searchInput" class="search" type="search" placeholder="Hledat karty…" hidden />
-      <button id="filterBtn" class="pill-btn" hidden>⚲ Filtr</button>
-      <button id="themeBtn" class="icon-btn" title="Přepnout tmavý režim" aria-label="Přepnout tmavý režim">◐</button>
-      <button id="menuBtn" class="icon-btn" title="Menu nástěnky" aria-label="Menu nástěnky" hidden>⋯</button>
+      <div id="searchWrap" class="search-wrap" hidden>
+        <svg class="icon search-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+        <input id="searchInput" class="search" type="search" placeholder="Hledat karty…" />
+      </div>
+      <button id="filterBtn" class="pill-btn" hidden>
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h18l-7 8v5l-4 2v-7z"/></svg>
+        <span id="filterLabel">Filtr</span>
+      </button>
+      <button id="themeBtn" class="icon-btn" title="Přepnout tmavý režim" aria-label="Přepnout tmavý režim">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.5A8.5 8.5 0 1 1 11.5 3 6.5 6.5 0 0 0 21 12.5z"/></svg>
+      </button>
+      <button id="menuBtn" class="icon-btn" title="Menu nástěnky" aria-label="Menu nástěnky" hidden>
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>
+      </button>
     </div>
   </header>
 

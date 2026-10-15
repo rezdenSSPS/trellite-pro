@@ -31,6 +31,32 @@ const el = (id) => document.getElementById(id);
 const escapeHtml = (s) => (s || "").replace(/[&<>"']/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
+/* ---------- SVG ikony (line style) ---------- */
+const ICONS = {
+  user: '<path d="M20 21a8 8 0 0 0-16 0"/><circle cx="12" cy="8" r="4"/>',
+  tag: '<path d="M3 11.3 11.3 3H20a1 1 0 0 1 1 1v8.7L12.7 21a1 1 0 0 1-1.4 0L3 12.7a1 1 0 0 1 0-1.4z"/><circle cx="7.6" cy="7.6" r="1.3"/>',
+  check: '<rect x="3" y="3" width="18" height="18" rx="4"/><path d="M8 12.2l2.6 2.6L16 9.4"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3 2"/>',
+  clip: '<path d="M20.5 11.7 12 20.2a5 5 0 0 1-7-7l8.2-8.2a3.3 3.3 0 0 1 4.7 4.7l-8.2 8.2a1.6 1.6 0 0 1-2.3-2.3l7.5-7.5"/>',
+  image: '<rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="8.5" cy="9.5" r="1.8"/><path d="M4 18l5-5 4 4 3-3 4 4"/>',
+  arrowRight: '<path d="M4 12h15"/><path d="M13 6l6 6-6 6"/>',
+  copy: '<rect x="8.5" y="8.5" width="11.5" height="11.5" rx="2.5"/><path d="M15.5 8.5V6A2 2 0 0 0 13.5 4h-7.5A2 2 0 0 0 4 6v7.5A2 2 0 0 0 6 15.5H8.5"/>',
+  archive: '<rect x="3" y="4" width="18" height="4" rx="1.5"/><path d="M5 8v10.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V8"/><path d="M10 12h4"/>',
+  trash: '<path d="M4 7h16"/><path d="M9.5 7V5h5v2"/><path d="M6 7l1 13h10l1-13"/>',
+  alignLeft: '<path d="M4 6h16"/><path d="M4 10.5h10"/><path d="M4 15h16"/><path d="M4 19.5h10"/>',
+  message: '<path d="M20.5 12a7.5 7.5 0 0 1-10.8 6.7L4 20l1.3-5A7.5 7.5 0 1 1 20.5 12z"/>',
+  filter: '<path d="M3 5h18l-7 8v5l-4 2v-7z"/>',
+  activity: '<path d="M3 12h3.5l2.5 7 4-14 2.5 7H21"/>',
+  download: '<path d="M12 4v10"/><path d="M8 11l4 4 4-4"/><path d="M5 19h14"/>',
+  upload: '<path d="M12 16V5.5"/><path d="M8 9.5l4-4 4 4"/><path d="M5 19h14"/>',
+  edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M14 5l4 4"/>',
+  grid: '<rect x="3" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5"/>',
+  more: '<circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/>',
+};
+function icon(name, size = 18) {
+  return `<svg class="icon" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ""}</svg>`;
+}
+
 /* ---------- Stav ---------- */
 let state = null;
 let currentBoardId = null;
@@ -304,7 +330,7 @@ function showBoards() {
   el("boardsView").hidden = false; el("boardView").hidden = true;
   el("boardTitle").textContent = ""; el("boardTitle").setAttribute("contenteditable", "false");
   el("boardStar").hidden = true;
-  el("searchInput").hidden = true; el("searchInput").value = "";
+  el("searchWrap").hidden = true; el("searchInput").value = "";
   el("filterBtn").hidden = true; el("menuBtn").hidden = true;
   document.body.style.background = "var(--bg)";
   renderBoards();
@@ -316,8 +342,8 @@ function openBoard(id) {
   el("boardsView").hidden = true; el("boardView").hidden = false;
   applyBoardBg(b);
   el("boardTitle").textContent = b.title; el("boardTitle").setAttribute("contenteditable", "true");
-  el("boardStar").hidden = false; el("boardStar").textContent = b.starred ? "★" : "☆"; el("boardStar").classList.toggle("on", !!b.starred);
-  el("searchInput").hidden = false;
+  el("boardStar").hidden = false; el("boardStar").classList.toggle("on", !!b.starred);
+  el("searchWrap").hidden = false;
   el("filterBtn").hidden = false; updateFilterBtn();
   el("menuBtn").hidden = false;
   renderBoard();
@@ -347,7 +373,7 @@ function boardCardEl(b) {
   const star = document.createElement("button"); star.className = "bc-btn bc-star" + (b.starred ? " on" : "");
   star.textContent = b.starred ? "★" : "☆"; star.title = "Oblíbené";
   star.onclick = (e) => { e.stopPropagation(); b.starred = !b.starred; save(); renderBoards(); };
-  const arch = document.createElement("button"); arch.className = "bc-btn"; arch.textContent = "⧉"; arch.title = "Archivovat nástěnku";
+  const arch = document.createElement("button"); arch.className = "bc-btn"; arch.innerHTML = icon("archive", 14); arch.title = "Archivovat nástěnku";
   arch.onclick = (e) => { e.stopPropagation(); b.archived = true; save(); renderBoards(); };
   const del = document.createElement("button"); del.className = "bc-btn"; del.textContent = "×"; del.title = "Smazat nástěnku";
   del.onclick = (e) => { e.stopPropagation();
@@ -402,7 +428,7 @@ function renderList(list) {
   const title = document.createElement("input"); title.className = "list-title"; title.value = list.title; title.draggable = false;
   title.onchange = () => { list.title = title.value.trim() || "Bez názvu"; save(); };
   const count = document.createElement("span"); count.className = "list-count"; count.textContent = list.cards.filter((c) => !c.archived).length;
-  const actions = document.createElement("button"); actions.className = "list-actions-btn"; actions.textContent = "⋯"; actions.title = "Akce seznamu";
+  const actions = document.createElement("button"); actions.className = "list-actions-btn"; actions.innerHTML = icon("more"); actions.title = "Akce seznamu";
   actions.onclick = (e) => openListMenu(e.currentTarget, list);
   header.append(title, count, actions);
   header.onclick = (e) => { if (list.collapsed && e.target === header) { list.collapsed = false; save(); renderBoard(); } };
@@ -461,15 +487,15 @@ function renderCard(card, list) {
 }
 function buildBadges(card) {
   const row = document.createElement("div"); row.className = "card-badges"; let has = false;
-  if (card.desc && card.desc.trim()) { has = true; row.insertAdjacentHTML("beforeend", `<span class="card-badge" title="Má popis">≣</span>`); }
+  if (card.desc && card.desc.trim()) { has = true; row.insertAdjacentHTML("beforeend", `<span class="card-badge" title="Má popis">${icon("alignLeft", 13)}</span>`); }
   if (card.due) { has = true; const st = dueState(card.due);
     const cls = st === "overdue" ? "due-overdue" : st === "soon" ? "due-soon" : st === "done" ? "due-done" : "";
-    row.insertAdjacentHTML("beforeend", `<span class="card-badge ${cls}">🕑 ${escapeHtml(fmtDue(card.due.date))}</span>`); }
+    row.insertAdjacentHTML("beforeend", `<span class="card-badge ${cls}">${icon("clock", 13)} ${escapeHtml(fmtDue(card.due.date))}</span>`); }
   const items = card.checklists.reduce((a, c) => a + c.items.length, 0);
   const done = card.checklists.reduce((a, c) => a + c.items.filter((i) => i.done).length, 0);
-  if (items) { has = true; row.insertAdjacentHTML("beforeend", `<span class="card-badge">☑ ${done}/${items}</span>`); }
-  if (card.comments.length) { has = true; row.insertAdjacentHTML("beforeend", `<span class="card-badge">💬 ${card.comments.length}</span>`); }
-  if (card.attachments.length) { has = true; row.insertAdjacentHTML("beforeend", `<span class="card-badge">📎 ${card.attachments.length}</span>`); }
+  if (items) { has = true; row.insertAdjacentHTML("beforeend", `<span class="card-badge">${icon("check", 13)} ${done}/${items}</span>`); }
+  if (card.comments.length) { has = true; row.insertAdjacentHTML("beforeend", `<span class="card-badge">${icon("message", 13)} ${card.comments.length}</span>`); }
+  if (card.attachments.length) { has = true; row.insertAdjacentHTML("beforeend", `<span class="card-badge">${icon("clip", 13)} ${card.attachments.length}</span>`); }
   if (card.memberIds.length) { has = true; const mw = document.createElement("div"); mw.className = "card-members";
     card.memberIds.forEach((id) => { const m = getMember(id); if (m) mw.appendChild(avatarEl(m, "sm")); }); row.appendChild(mw); }
   return has ? row : null;
@@ -610,7 +636,7 @@ function renderModal() {
 }
 function renderModalBody(card) {
   const body = el("modalBody"); body.innerHTML = "";
-  body.insertAdjacentHTML("beforeend", `<div class="modal-label"><span class="ico">≣</span> Popis</div>`);
+  body.insertAdjacentHTML("beforeend", `<div class="modal-label">${icon("alignLeft")} Popis</div>`);
   const descWrap = document.createElement("div"); descWrap.className = "section-body";
   const rendered = document.createElement("div"); rendered.className = "desc-rendered" + (card.desc ? "" : " placeholder");
   rendered.textContent = card.desc || "Přidejte podrobnější popis…";
@@ -627,7 +653,7 @@ function renderModalBody(card) {
   card.checklists.forEach((cl) => body.appendChild(renderChecklist(card, cl)));
 
   if (card.attachments.length) {
-    body.insertAdjacentHTML("beforeend", `<div class="modal-label"><span class="ico">📎</span> Přílohy</div>`);
+    body.insertAdjacentHTML("beforeend", `<div class="modal-label">${icon("clip")} Přílohy</div>`);
     const aw = document.createElement("div"); aw.className = "section-body";
     card.attachments.forEach((att) => {
       const row = document.createElement("div"); row.className = "attachment";
@@ -642,7 +668,7 @@ function renderModalBody(card) {
     body.appendChild(aw);
   }
 
-  body.insertAdjacentHTML("beforeend", `<div class="modal-label"><span class="ico">💬</span> Komentáře a aktivita</div>`);
+  body.insertAdjacentHTML("beforeend", `<div class="modal-label">${icon("message")} Komentáře a aktivita</div>`);
   const cw = document.createElement("div"); cw.className = "section-body";
   const form = document.createElement("div"); form.className = "inline-form";
   form.innerHTML = `<input placeholder="Napsat komentář…" /><button>Uložit</button>`;
@@ -668,7 +694,7 @@ function renderChecklist(card, cl) {
   const done = cl.items.filter((i) => i.done).length;
   const pct = cl.items.length ? Math.round(done / cl.items.length * 100) : 0;
   const head = document.createElement("div"); head.className = "modal-label";
-  head.innerHTML = `<span class="ico">☑</span> <span style="flex:1">${escapeHtml(cl.title)}</span>`;
+  head.innerHTML = `${icon("check")} <span style="flex:1">${escapeHtml(cl.title)}</span>`;
   const delCl = document.createElement("button"); delCl.className = "c-del"; delCl.textContent = "Smazat";
   delCl.onclick = () => { card.checklists = card.checklists.filter((x) => x.id !== cl.id); save(); renderModalBody(card); renderBoard(); };
   head.appendChild(delCl); section.appendChild(head);
@@ -701,17 +727,17 @@ function renderModalSide(card) {
   side.insertAdjacentHTML("beforeend", `<div class="side-title">Přidat na kartu</div>`);
   const mk = (icon, label, fn, cls = "") => { const b = document.createElement("button"); b.className = "side-btn " + cls;
     b.innerHTML = `<span>${icon}</span><span>${label}</span>`; b.onclick = (e) => fn(e.currentTarget); side.appendChild(b); return b; };
-  mk("👤", "Členové", (a) => memberPopover(a, card));
-  mk("🏷️", "Štítky", (a) => labelPopover(a, card));
-  mk("☑", "Úkoly", () => { card.checklists.push({ id: uid(), title: "Úkoly", items: [] }); save(); renderModalBody(card); });
-  mk("🕑", "Termín", (a) => datePopover(a, card));
-  mk("📎", "Příloha", (a) => attachPopover(a, card));
-  mk("🖼️", "Obal", (a) => coverPopover(a, card));
+  mk(icon("user"), "Členové", (a) => memberPopover(a, card));
+  mk(icon("tag"), "Štítky", (a) => labelPopover(a, card));
+  mk(icon("check"), "Úkoly", () => { card.checklists.push({ id: uid(), title: "Úkoly", items: [] }); save(); renderModalBody(card); });
+  mk(icon("clock"), "Termín", (a) => datePopover(a, card));
+  mk(icon("clip"), "Příloha", (a) => attachPopover(a, card));
+  mk(icon("image"), "Obal", (a) => coverPopover(a, card));
   side.insertAdjacentHTML("beforeend", `<div class="side-title">Akce</div>`);
-  mk("➡️", "Přesunout", (a) => movePopover(a, card));
-  mk("⧉", "Kopírovat", (a) => copyPopover(a, card));
-  mk("🗄️", "Archivovat", () => { const { card: c } = getActive(); c.archived = true; logActivity(`archivoval(a) kartu „${c.title}“`); save(); closeModal(); });
-  mk("🗑️", "Smazat", () => { const { list, card: c } = getActive();
+  mk(icon("arrowRight"), "Přesunout", (a) => movePopover(a, card));
+  mk(icon("copy"), "Kopírovat", (a) => copyPopover(a, card));
+  mk(icon("archive"), "Archivovat", () => { const { card: c } = getActive(); c.archived = true; logActivity(`archivoval(a) kartu „${c.title}“`); save(); closeModal(); });
+  mk(icon("trash"), "Smazat", () => { const { list, card: c } = getActive();
     if (confirm(`Smazat kartu „${c.title}“?`)) { list.cards = list.cards.filter((x) => x.id !== c.id); save(); closeModal(); } }, "danger");
 }
 
@@ -738,7 +764,7 @@ function labelPopover(anchor, card) {
       save(); renderModal(); renderBoard(); labelPopover(anchor, card); };
     row.appendChild(chip);
     if (card.labelIds.includes(lab.id)) row.insertAdjacentHTML("beforeend", `<span class="check">✓</span>`);
-    const edit = document.createElement("button"); edit.textContent = "✎"; edit.style.cssText = "background:none;border:none;cursor:pointer;color:var(--muted)";
+    const edit = document.createElement("button"); edit.innerHTML = icon("edit", 15); edit.style.cssText = "background:none;border:none;cursor:pointer;color:var(--muted);display:inline-flex;align-items:center";
     edit.onclick = () => editLabelPopover(anchor, card, lab); row.appendChild(edit); body.appendChild(row);
   });
   const addBtn = document.createElement("button"); addBtn.className = "pop-btn subtle"; addBtn.textContent = "+ Vytvořit nový štítek";
@@ -857,18 +883,18 @@ function renderDrawer() {
     titleEl.textContent = "Menu";
     const add = (icon, label, fn) => { const r = document.createElement("div"); r.className = "drawer-row";
       r.innerHTML = `<span class="ico">${icon}</span><span>${label}</span>`; r.onclick = fn; bodyEl.appendChild(r); };
-    add("🖼️", "Změnit pozadí", () => pushDrawer("bg"));
-    add("🏷️", "Štítky", () => pushDrawer("labels"));
-    add("👤", "Členové", () => pushDrawer("members"));
-    add("⚲", "Filtrovat karty", () => pushDrawer("filter"));
+    add(icon("image"), "Změnit pozadí", () => pushDrawer("bg"));
+    add(icon("tag"), "Štítky", () => pushDrawer("labels"));
+    add(icon("user"), "Členové", () => pushDrawer("members"));
+    add(icon("filter"), "Filtrovat karty", () => pushDrawer("filter"));
     bodyEl.insertAdjacentHTML("beforeend", `<div class="drawer-section-title">Položky</div>`);
-    add("📋", "Aktivita", () => pushDrawer("activity"));
-    add("🗄️", "Archivované položky", () => pushDrawer("archive"));
+    add(icon("activity"), "Aktivita", () => pushDrawer("activity"));
+    add(icon("archive"), "Archivované položky", () => pushDrawer("archive"));
     bodyEl.insertAdjacentHTML("beforeend", `<div class="drawer-section-title">Nástěnka</div>`);
-    add("⬇️", "Exportovat nástěnku (JSON)", exportBoard);
-    add("⬆️", "Importovat nástěnky (JSON)", importBoards);
-    add("⧉", "Archivovat tuto nástěnku", () => { board.archived = true; save(); closeDrawer(); showBoards(); });
-    add("🗑️", "Smazat tuto nástěnku", () => { if (confirm(`Smazat nástěnku „${board.title}“?`)) { state.boards = state.boards.filter((b) => b.id !== board.id); save(); closeDrawer(); showBoards(); } });
+    add(icon("download"), "Exportovat nástěnku (JSON)", exportBoard);
+    add(icon("upload"), "Importovat nástěnky (JSON)", importBoards);
+    add(icon("archive"), "Archivovat tuto nástěnku", () => { board.archived = true; save(); closeDrawer(); showBoards(); });
+    add(icon("trash"), "Smazat tuto nástěnku", () => { if (confirm(`Smazat nástěnku „${board.title}“?`)) { state.boards = state.boards.filter((b) => b.id !== board.id); save(); closeDrawer(); showBoards(); } });
     bodyEl.insertAdjacentHTML("beforeend",
       `<div class="scope-note">Neobsaženo (vyžaduje server nebo je to placená funkce Trella): automatizace (Butler), rozšíření (Power-Ups), e-mailová oznámení a pohledy Kalendář/Časová osa/Dashboard. Data se ale ukládají do reálné databáze a synchronizují mezi zařízeními.</div>`);
   }
@@ -919,7 +945,7 @@ function renderDrawer() {
       bodyEl.appendChild(row); });
     bodyEl.insertAdjacentHTML("beforeend", `<div class="drawer-section-title">Termín</div>`);
     [["none", "Bez termínu"], ["overdue", "Po termínu"], ["soon", "Brzy termín"], ["done", "Označeno hotové"]].forEach(([k, label]) => {
-      const row = document.createElement("div"); row.className = "drawer-row"; row.innerHTML = `<span class="ico">🕑</span><span style="flex:1">${label}</span>`;
+      const row = document.createElement("div"); row.className = "drawer-row"; row.innerHTML = `<span class="ico">${icon("clock")}</span><span style="flex:1">${label}</span>`;
       if (filter.due === k) row.insertAdjacentHTML("beforeend", `<span class="check">✓</span>`);
       row.onclick = () => { filter.due = filter.due === k ? null : k; updateFilterBtn(); renderBoard(); renderDrawer(); }; bodyEl.appendChild(row); });
     const clear = document.createElement("button"); clear.className = "pop-btn subtle"; clear.textContent = "Zrušit filtry";
@@ -985,12 +1011,13 @@ el("drawerOverlay").addEventListener("click", (e) => { if (e.target === el("draw
 el("filterBtn").onclick = () => openDrawer("filter");
 function updateFilterBtn() {
   const n = filter.labels.length + filter.members.length + (filter.due ? 1 : 0);
-  const btn = el("filterBtn"); btn.textContent = n ? `⚲ Filtr (${n})` : "⚲ Filtr"; btn.classList.toggle("active", n > 0);
+  el("filterLabel").textContent = n ? `Filtr (${n})` : "Filtr";
+  el("filterBtn").classList.toggle("active", n > 0);
 }
 el("themeBtn").onclick = () => { state.theme = state.theme === "dark" ? "light" : "dark"; applyTheme(); save(); };
 el("searchInput").addEventListener("input", renderBoard);
 el("boardStar").onclick = () => { const b = getBoard(); b.starred = !b.starred;
-  el("boardStar").textContent = b.starred ? "★" : "☆"; el("boardStar").classList.toggle("on", b.starred); save(); };
+  el("boardStar").classList.toggle("on", b.starred); save(); };
 el("boardTitle").addEventListener("blur", () => { const b = getBoard(); if (!b) return;
   const t = el("boardTitle").textContent.trim() || "Nástěnka bez názvu"; el("boardTitle").textContent = t; b.title = t; save(); });
 el("boardTitle").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); el("boardTitle").blur(); } });
