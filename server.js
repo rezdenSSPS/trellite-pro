@@ -12,6 +12,7 @@ const crypto = require("crypto");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const cookieParser = require("cookie-parser");
+const webpush = require("web-push");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -19,7 +20,9 @@ const WORKSPACE_ID = "default";
 
 app.use(express.json({ limit: "15mb" }));
 app.use(cookieParser());
-app.use(express.static(path.join(__dirname, "public")));
+app.use(express.static(path.join(__dirname, "public"), {
+  setHeaders: (res, file) => { if (file.endsWith("sw.js") || file.endsWith("manifest.json")) res.setHeader("Cache-Control", "no-cache"); },
+}));
 
 const uid = () => crypto.randomBytes(6).toString("hex");
 
@@ -61,7 +64,9 @@ async function loadDoc() {
   if (!d || !d.users) { d = seed(); await storage.set(d); }
   if (!d.meta) d.meta = {};
   if (!d.meta.jwtSecret) { d.meta.jwtSecret = crypto.randomBytes(32).toString("hex"); await storage.set(d); }
+  if (!d.meta.vapid && !process.env.VAPID_PUBLIC_KEY) { d.meta.vapid = webpush.generateVAPIDKeys(); await storage.set(d); }
   DOC = d;
+  setupPush();
 }
 let saveTimer = null;
 function persist() { clearTimeout(saveTimer); saveTimer = setTimeout(() => storage.set(DOC).catch((e) => console.error("persist", e)), 150); }
@@ -217,7 +222,8 @@ function filterStateFor(u) {
   });
   const members = DOC.users.map((x) => ({ id: x.id, name: x.name, color: x.color }));
   const validNew = (u.newTaskIds || []).filter((id) => { const f = findCard(id); return f && f.card.memberIds.includes(u.id) && !f.card.archived; });
-  const me = { id: u.id, username: u.username, name: u.name, role: u.role, color: u.color, theme: u.theme || "light", access: u.access, newTaskCount: validNew.length, newTaskIds: validNew };
+  const me = { id: u.id, username: u.username, name: u.name, role: u.role, color: u.color, theme: u.theme || "light", access: u.access, newTaskCount: validNew.length, newTaskIds: validNew,
+    notify: notifyPrefs(u), pushDevices: (u.pushSubs || []).map((s) => s.endpoint) };
   const out = { me, state: { activeMemberId: u.id, theme: u.theme || "light", members, boards } };
   if (isAdmin(u)) {
     out.users = DOC.users.map(sanitizeUser);
@@ -229,8 +235,72 @@ function filterStateFor(u) {
 /* přiřazení → upozornění */
 function noteAssignments(card, prevIds, actorId) {
   const added = card.memberIds.filter((id) => !prevIds.includes(id));
-  added.forEach((id) => { if (id === actorId) return; const u = findUser(id); if (u && !u.newTaskIds.includes(card.id)) u.newTaskIds.push(card.id); });
+  const actor = findUser(actorId);
+  added.forEach((id) => { if (id === actorId) return; const u = findUser(id); if (!u) return;
+    if (!u.newTaskIds.includes(card.id)) u.newTaskIds.push(card.id);
+    const f = findCard(card.id);
+    notifyUser(u, "assign", { title: "Nový úkol" + (f ? " · " + f.board.title : ""), body: `${actor ? actor.name : "Někdo"} ti přiřadil: ${card.title}`, url: cardUrl(card.id), tag: "assign-" + card.id });
+  });
 }
+/* nový komentář → řešitelé karty kromě autora */
+function noteComments(card, prevComments, actorId) {
+  const prev = new Set((prevComments || []).map((c) => c.id));
+  const actor = findUser(actorId); const f = findCard(card.id);
+  (card.comments || []).filter((c) => !prev.has(c.id) && c.memberId === actorId).forEach((c) => {
+    card.memberIds.forEach((id) => { if (id === actorId) return; const u = findUser(id); if (!u) return;
+      const text = String(c.text || ""); notifyUser(u, "comment", { title: "Komentář · " + card.title, body: `${actor ? actor.name : "Někdo"}: ${text.length > 140 ? text.slice(0, 137) + "…" : text}`, url: cardUrl(card.id), tag: "comment-" + card.id }); });
+  });
+}
+
+/* ============================================================
+   PUSH UPOZORNĚNÍ (Web Push — iPhone od iOS 16.4 po přidání na plochu)
+   ============================================================ */
+const NOTIFY_DEFAULTS = { assign: true, comment: true, due: true };
+const notifyPrefs = (u) => Object.assign({}, NOTIFY_DEFAULTS, u.notify || {});
+const cardUrl = (id) => "/#card=" + id;
+let pushReady = false;
+function vapidKeys() { return process.env.VAPID_PUBLIC_KEY ? { publicKey: process.env.VAPID_PUBLIC_KEY, privateKey: process.env.VAPID_PRIVATE_KEY } : DOC.meta.vapid; }
+function setupPush() {
+  const k = vapidKeys(); if (!k || !k.publicKey || !k.privateKey) return;
+  // Apple vyžaduje platný kontakt (mailto: nebo https URL)
+  const subject = process.env.VAPID_SUBJECT || DOC.meta.pushOrigin || "mailto:admin@trellite.app";
+  try { webpush.setVapidDetails(subject, k.publicKey, k.privateKey); pushReady = true; } catch (e) { console.error("VAPID", e.message); }
+}
+async function sendPush(u, payload) {
+  if (!pushReady || !(u.pushSubs || []).length) return;
+  const data = JSON.stringify(payload); let changed = false;
+  await Promise.all(u.pushSubs.slice().map(async (sub) => {
+    try { await webpush.sendNotification({ endpoint: sub.endpoint, keys: sub.keys }, data, { TTL: 24 * 3600, urgency: "high" }); }
+    catch (e) {
+      if (e.statusCode === 404 || e.statusCode === 410) { u.pushSubs = u.pushSubs.filter((s) => s.endpoint !== sub.endpoint); changed = true; }
+      else console.error("push", e.statusCode || "", e.body || e.message);
+    }
+  }));
+  if (changed) persist();
+}
+function notifyUser(u, kind, payload) { if (notifyPrefs(u)[kind]) sendPush(u, payload).catch((e) => console.error("push", e)); }
+
+/* kontrola termínů: do 24 h a po termínu — každý termín jen jednou */
+function checkDueDates() {
+  if (!DOC || !pushReady) return;
+  const now = Date.now(); let changed = false;
+  DOC.boards.forEach((b) => { if (b.archived) return; b.lists.forEach((l) => { if (l.archived) return; l.cards.forEach((c) => {
+    if (c.archived || !c.due || c.due.done || !c.memberIds.length) return;
+    const sent = c.dueNotified || {}; const diff = c.due.date - now;
+    let kind = null;
+    if (diff > 0 && diff <= 24 * 3600e3 && sent.soon !== c.due.date) kind = "soon";
+    else if (diff <= 0 && diff > -24 * 3600e3 && sent.late !== c.due.date) kind = "late";
+    if (!kind) return;
+    c.dueNotified = Object.assign({}, sent, { [kind]: c.due.date }); changed = true;
+    const when = new Date(c.due.date).toLocaleString("cs-CZ", { timeZone: process.env.TZ || "Europe/Prague", day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit" });
+    c.memberIds.forEach((id) => { const u = findUser(id); if (!u) return;
+      notifyUser(u, "due", { title: kind === "soon" ? "Blíží se termín · " + b.title : "Po termínu · " + b.title, body: `${c.title} (${when})`, url: cardUrl(c.id), tag: "due-" + c.id }); });
+  }); }); });
+  if (changed) persist();
+}
+const DUE_CHECK_MS = Number(process.env.DUE_CHECK_MS) || 10 * 60e3;
+setInterval(checkDueDates, DUE_CHECK_MS);
+setTimeout(checkDueDates, Math.min(DUE_CHECK_MS, 30e3));
 
 /* ============================================================
    SSE (živé změny)
@@ -279,6 +349,33 @@ app.get("/api/events", requireAuth, (req, res) => {
    ÚČET
    ============================================================ */
 app.post("/api/account/theme", requireAuth, (req, res) => { req.user.theme = req.body.theme === "dark" ? "dark" : "light"; persist(); res.json({ ok: true }); });
+app.get("/api/push/key", requireAuth, (req, res) => { const k = vapidKeys(); res.json({ publicKey: pushReady && k ? k.publicKey : null }); });
+app.post("/api/push/subscribe", requireAuth, (req, res) => {
+  const sub = (req.body || {}).subscription;
+  if (!sub || typeof sub.endpoint !== "string" || !/^https:\/\//.test(sub.endpoint) || !sub.keys || !sub.keys.p256dh || !sub.keys.auth) return res.status(400).json({ error: "bad_subscription" });
+  if (!DOC.meta.pushOrigin && !process.env.VAPID_SUBJECT) {
+    const proto = String(req.header("x-forwarded-proto") || req.protocol).split(",")[0];
+    if (proto === "https") { DOC.meta.pushOrigin = "https://" + req.get("host"); setupPush(); }
+  }
+  // jedno zařízení patří jen jednomu uživateli
+  DOC.users.forEach((u) => { if (u.pushSubs) u.pushSubs = u.pushSubs.filter((s) => s.endpoint !== sub.endpoint); });
+  req.user.pushSubs = (req.user.pushSubs || []).concat([{ endpoint: sub.endpoint, keys: { p256dh: sub.keys.p256dh, auth: sub.keys.auth }, ua: String(req.header("user-agent") || "").slice(0, 200), createdAt: Date.now() }]).slice(-10);
+  persist(); res.json(filterStateFor(req.user));
+});
+app.post("/api/push/unsubscribe", requireAuth, (req, res) => {
+  const ep = (req.body || {}).endpoint; req.user.pushSubs = (req.user.pushSubs || []).filter((s) => s.endpoint !== ep);
+  persist(); res.json(filterStateFor(req.user));
+});
+app.post("/api/push/test", requireAuth, async (req, res) => {
+  if (!(req.user.pushSubs || []).length) return res.status(400).json({ error: "no_devices" });
+  await sendPush(req.user, { title: "Trellite", body: "Upozornění fungují. Takhle uvidíš nové úkoly, komentáře a termíny.", url: "/", tag: "test" });
+  res.json({ ok: true });
+});
+app.post("/api/account/notify", requireAuth, (req, res) => {
+  const b = req.body || {}; const cur = notifyPrefs(req.user);
+  Object.keys(NOTIFY_DEFAULTS).forEach((k) => { if (b[k] !== undefined) cur[k] = !!b[k]; });
+  req.user.notify = cur; persist(); res.json(filterStateFor(req.user));
+});
 app.post("/api/account/seen", requireAuth, (req, res) => { req.user.newTaskIds = []; persist(); res.json(filterStateFor(req.user)); });
 app.post("/api/account/password", requireAuth, (req, res) => {
   const { current, next } = req.body || {};
@@ -359,10 +456,11 @@ app.post("/api/lists/:id/cards", requireAuth, (req, res) => {
 app.put("/api/cards/:id", requireAuth, (req, res) => {
   const f = findCard(req.params.id); if (!f) return res.status(404).json({ error: "not_found" });
   if (!canEditCard(req.user, f.board, f.list, f.card)) return res.status(403).json({ error: "forbidden" });
-  const body = req.body || {}; const prevMembers = f.card.memberIds.slice();
+  const body = req.body || {}; const prevMembers = f.card.memberIds.slice(); const prevComments = (f.card.comments || []).slice();
   const allowed = ["title", "desc", "labelIds", "memberIds", "due", "start", "cover", "checklists", "attachments", "comments", "archived"];
   allowed.forEach((k) => { if (body[k] !== undefined) f.card[k] = body[k]; });
   if (body.memberIds !== undefined) noteAssignments(f.card, prevMembers, req.user.id);
+  if (body.comments !== undefined) noteComments(f.card, prevComments, req.user.id);
   respond(req, res);
 });
 app.delete("/api/cards/:id", requireAuth, (req, res) => {
@@ -375,7 +473,7 @@ app.post("/api/cards/:id/copy", requireAuth, (req, res) => {
   if (!canSeeList(req.user, f.board, f.list)) return res.status(403).json({ error: "forbidden" });
   const copy = JSON.parse(JSON.stringify(f.card)); copy.id = uid();
   copy.title = String(req.body.title || f.card.title).trim() || f.card.title;
-  copy.comments = []; copy.createdAt = Date.now();
+  copy.comments = []; copy.createdAt = Date.now(); delete copy.dueNotified;
   (copy.checklists || []).forEach((cl) => { cl.id = uid(); (cl.items || []).forEach((i) => i.id = uid()); });
   (copy.attachments || []).forEach((a) => a.id = uid());
   const idx = f.list.cards.findIndex((c) => c.id === f.card.id);

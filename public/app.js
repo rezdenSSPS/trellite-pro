@@ -36,6 +36,7 @@ const ICONS = {
   users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.8"/><path d="M16 3.2A4 4 0 0 1 16 11"/>',
   logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/>',
   plus: '<path d="M12 5v14"/><path d="M5 12h14"/>',
+  bell: '<path d="M6 9a6 6 0 0 1 12 0c0 6 2.5 7.5 2.5 7.5h-17S6 15 6 9z"/><path d="M10 20a2 2 0 0 0 4 0"/>',
   key: '<circle cx="8" cy="15" r="4"/><path d="M11 12 20 3"/><path d="M17 6l2 2"/><path d="M15 8l2 2"/>',
 };
 function icon(name, size = 18) { return `<svg class="icon" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ""}</svg>`; }
@@ -106,7 +107,7 @@ el("loginForm").addEventListener("submit", async (e) => {
     const r = await fetch("/api/login", { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "same-origin", body: JSON.stringify({ username, password }) });
     const j = await r.json();
     if (!r.ok) { el("loginError").textContent = errMsg(j.error); el("loginError").hidden = false; return; }
-    applyPayload(j); showApp(); el("loginPass").value = ""; connectSSE(); showBoards();
+    applyPayload(j); showApp(); el("loginPass").value = ""; connectSSE(); showBoards(); refreshPushState().then(renderPushHint); openFromUrl(location.href);
   } catch (e) { el("loginError").textContent = "Chyba připojení."; el("loginError").hidden = false; }
 });
 
@@ -267,6 +268,7 @@ function renderBoards() {
   el("greetingSub").textContent = tasks.length
     ? `Máš ${tasks.length} ${plural(tasks.length, "přiřazený úkol", "přiřazené úkoly", "přiřazených úkolů")}` + (late ? `, ${late} ${plural(late, "je", "jsou", "je")} po termínu.` : ".")
     : "Nemáš žádné přiřazené úkoly.";
+  renderPushHint();
   el("tasksSection").hidden = tasks.length === 0;
   el("tasksCount").textContent = tasks.length;
   const rows = el("tasksList"); rows.innerHTML = "";
@@ -839,8 +841,10 @@ el("resetSampleBtn").onclick = () => { if (confirm("Obnovit ukázková data? Nah
 
 el("sideUser").onclick = (e) => el("userBtn").onclick(e);
 el("userBtn").onclick = (e) => {
+  const anchorEl = e.currentTarget;
   const body = document.createElement("div");
   const info = document.createElement("div"); info.className = "pop-user"; info.innerHTML = `<b>${escapeHtml(me.name)}</b><br><span style="color:var(--muted);font-size:12px">${escapeHtml(me.username)} · ${me.role === "admin" ? "admin" : "manažer"}</span>`; body.appendChild(info);
+  const nt = document.createElement("div"); nt.className = "pop-row"; nt.innerHTML = `${icon("bell", 16)} <span>Upozornění</span>`; nt.onclick = () => notifyPopover(anchorEl); body.appendChild(nt);
   const pw = document.createElement("div"); pw.className = "pop-row"; pw.innerHTML = `${icon("key", 16)} <span>Změnit heslo</span>`; pw.onclick = () => { closePopover(); changePassword(); }; body.appendChild(pw);
   if (isAdmin()) { const ad = document.createElement("div"); ad.className = "pop-row"; ad.innerHTML = `${icon("users", 16)} <span>Správa uživatelů</span>`; ad.onclick = () => { closePopover(); showAdmin(); }; body.appendChild(ad); }
   const out = document.createElement("div"); out.className = "pop-row"; out.innerHTML = `${icon("logout", 16)} <span>Odhlásit se</span>`; out.onclick = () => { closePopover(); logout(); }; body.appendChild(out);
@@ -856,9 +860,114 @@ async function logout() { try { await fetch("/api/logout", { method: "POST", cre
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") { if (!el("popover").hidden) return closePopover(); if (!el("modalOverlay").hidden) return closeModal(); if (!el("drawerOverlay").hidden) return closeDrawer(); } });
 
 /* ============================================================
+   Push upozornění
+   ============================================================ */
+const pushSupported = () => "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+const isIOS = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+const isStandalone = () => navigator.standalone === true || window.matchMedia("(display-mode: standalone)").matches;
+let pushState = { supported: false, subscribed: false, permission: "default" };
+
+function registerSW() {
+  if (!("serviceWorker" in navigator)) return;
+  navigator.serviceWorker.register("/sw.js").catch((e) => console.warn("SW", e));
+  navigator.serviceWorker.addEventListener("message", (e) => { if (e.data && e.data.type === "open-url") openFromUrl(e.data.url); });
+}
+async function currentSubscription() {
+  if (!pushSupported()) return null;
+  const reg = await navigator.serviceWorker.getRegistration(); if (!reg) return null;
+  return reg.pushManager.getSubscription();
+}
+async function refreshPushState() {
+  const supported = pushSupported(); let subscribed = false;
+  try { const sub = await currentSubscription(); subscribed = !!(sub && me && (me.pushDevices || []).includes(sub.endpoint)); } catch (e) {}
+  pushState = { supported, subscribed, permission: supported ? Notification.permission : "unsupported" };
+  return pushState;
+}
+function b64ToBytes(b64) { const pad = "=".repeat((4 - (b64.length % 4)) % 4); const raw = atob((b64 + pad).replace(/-/g, "+").replace(/_/g, "/")); return Uint8Array.from(raw, (c) => c.charCodeAt(0)); }
+async function enablePush() {
+  if (!pushSupported()) return toast("Tento prohlížeč upozornění nepodporuje.");
+  const perm = await Notification.requestPermission();
+  if (perm !== "granted") { await refreshPushState(); return toast("Upozornění nejsou povolená."); }
+  try {
+    const { publicKey } = await api("GET", "/push/key"); if (!publicKey) return toast("Server upozornění zatím nepodporuje.");
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(publicKey) });
+    applyPayload(await api("POST", "/push/subscribe", { subscription: sub.toJSON() }));
+    await refreshPushState(); toast("Upozornění zapnuta na tomto zařízení.");
+  } catch (e) { if (!e.unauth) toast("Upozornění se nepodařilo zapnout."); }
+}
+async function disablePush() {
+  try { const sub = await currentSubscription(); if (sub) { applyPayload(await api("POST", "/push/unsubscribe", { endpoint: sub.endpoint })); await sub.unsubscribe(); } } catch (e) {}
+  await refreshPushState(); toast("Upozornění na tomto zařízení vypnuta.");
+}
+function pushHelpHtml() {
+  if (isIOS() && !isStandalone()) return `<b>Na iPhonu nejdřív přidej Trellite na plochu:</b> v Safari klepni na <b>Sdílet</b> → <b>Přidat na plochu</b>, otevři Trellite z ikony na ploše a upozornění zapni tam. Vyžaduje iOS 16.4 nebo novější.`;
+  if (!pushState.supported) return "Tento prohlížeč push upozornění nepodporuje.";
+  if (pushState.permission === "denied") return isIOS() ? "Upozornění jsou zablokovaná. Povol je v Nastavení → Oznámení → Trellite." : "Upozornění jsou v prohlížeči zablokovaná. Povol je v nastavení webu.";
+  return "";
+}
+async function notifyPopover(anchor) {
+  await refreshPushState();
+  const body = document.createElement("div"); body.className = "notify-pop";
+  const help = pushHelpHtml();
+  const status = document.createElement("div"); status.className = "notify-status" + (pushState.subscribed ? " on" : "");
+  status.innerHTML = pushState.subscribed ? `<span class="notify-dot"></span>Zapnuto na tomto zařízení` : help ? `<span>${help}</span>` : `<span class="notify-dot"></span>Na tomto zařízení vypnuto`;
+  body.appendChild(status);
+  if (!help || pushState.subscribed) {
+    if (pushState.subscribed) {
+      const test = document.createElement("button"); test.className = "pop-btn"; test.textContent = "Poslat zkušební upozornění";
+      test.onclick = () => api("POST", "/push/test").then(() => toast("Odesláno. Mělo by dorazit během pár vteřin.")).catch(() => {});
+      const off = document.createElement("button"); off.className = "pop-btn subtle"; off.textContent = "Vypnout na tomto zařízení";
+      off.onclick = async () => { await disablePush(); notifyPopover(anchor); };
+      body.append(test, off);
+    } else {
+      const on = document.createElement("button"); on.className = "pop-btn"; on.textContent = "Zapnout na tomto zařízení";
+      on.onclick = async () => { await enablePush(); notifyPopover(anchor); renderPushHint(); };
+      body.appendChild(on);
+    }
+  }
+  body.insertAdjacentHTML("beforeend", `<div class="drawer-section-title">Upozornit mě na</div>`);
+  const prefs = me.notify || { assign: true, comment: true, due: true };
+  [["assign", "Nový přiřazený úkol"], ["comment", "Komentář na mé kartě"], ["due", "Blížící se termín a po termínu"]].forEach(([k, label]) => {
+    const row = document.createElement("label"); row.className = "notify-opt";
+    const cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = prefs[k] !== false;
+    cb.onchange = () => mutate("POST", "/account/notify", { [k]: cb.checked }).catch(() => {});
+    row.append(cb, document.createTextNode(label)); body.appendChild(row);
+  });
+  const n = (me.pushDevices || []).length;
+  body.insertAdjacentHTML("beforeend", `<div class="notify-foot">${n ? `Zapnuto na ${n} ${plural(n, "zařízení", "zařízeních", "zařízeních")}.` : "Zatím není zapnuto na žádném zařízení."}</div>`);
+  popover(anchor, "Upozornění", body);
+}
+function renderPushHint() {
+  let hint = el("pushHint");
+  let dismissed = false; try { dismissed = localStorage.getItem("pushHintDismissed") === "1"; } catch (e) {}
+  const show = me && !dismissed && !pushState.subscribed && pushState.permission !== "denied" && (pushState.supported || isIOS());
+  if (!show) { if (hint) hint.remove(); return; }
+  if (!hint) { hint = document.createElement("div"); hint.id = "pushHint"; hint.className = "push-hint"; el("tasksSection").before(hint); }
+  const ios = isIOS() && !isStandalone();
+  hint.innerHTML = `<span class="push-hint-ico">${icon("bell", 18)}</span><div class="push-hint-text"><b>Zapni si upozornění na telefonu</b><span>${ios ? "Přidej Trellite na plochu (Sdílet → Přidat na plochu) a dostaneš upozornění na nové úkoly a termíny." : "Dostaneš upozornění na nové úkoly, komentáře a termíny, i když aplikaci nemáš otevřenou."}</span></div>`;
+  if (!ios) { const b = document.createElement("button"); b.className = "primary-btn"; b.textContent = "Zapnout"; b.onclick = async () => { await enablePush(); renderPushHint(); }; hint.appendChild(b); }
+  const x = document.createElement("button"); x.className = "icon-btn push-hint-close"; x.setAttribute("aria-label", "Skrýt"); x.textContent = "×";
+  x.onclick = () => { try { localStorage.setItem("pushHintDismissed", "1"); } catch (e) {} hint.remove(); }; hint.appendChild(x);
+}
+
+/* Odkaz na kartu (#card=ID) — z push upozornění */
+function openFromUrl(url) {
+  let id = null; try { const m = new URL(url, location.origin).hash.match(/card=([\w-]+)/); id = m && m[1]; } catch (e) {}
+  if (!id || !state) return;
+  for (const b of state.boards) { if (b.virtual) continue;
+    for (const l of b.lists) { if (l.cards.some((c) => c.id === id)) { openBoard(b.id); openCard(l.id, id); history.replaceState(null, "", location.pathname); return; } } }
+  toast("Karta už neexistuje nebo k ní nemáš přístup."); history.replaceState(null, "", location.pathname);
+}
+window.addEventListener("hashchange", () => openFromUrl(location.href));
+
+/* ============================================================
    Start
    ============================================================ */
 (async function boot() {
-  try { const j = await api("GET", "/state"); applyPayload(j); showApp(); connectSSE(); showBoards(); setSync("online", "Připojeno"); }
+  registerSW();
+  try { const j = await api("GET", "/state"); applyPayload(j); showApp(); connectSSE(); showBoards(); setSync("online", "Připojeno");
+    refreshPushState().then(renderPushHint); openFromUrl(location.href); }
   catch (e) { showLogin(); }
 })();
