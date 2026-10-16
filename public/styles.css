@@ -776,3 +776,15 @@ textarea.pop-input { resize: vertical; font: inherit; }
 @media (max-width: 900px) {
   .people-cols { grid-template-columns: 1fr; }
 }
+
+/* Závady: přehled nahoře + stavy (Nová / Řeší se / Vyřešeno) */
+.chip.accent { background: var(--accent-soft); color: var(--accent-soft-ink); }
+.fault-overview { margin-bottom: 24px; padding: 16px; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-lg); }
+.fault-overview .fault-list { margin-top: 0; max-height: 360px; overflow-y: auto; }
+.fault-top { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 2px; }
+.fault-spz { font-weight: 600; font-size: 13px; }
+.fault.in_progress { border-left-color: var(--accent); }
+.fault.resolved { border-left-color: var(--ok); background: var(--subtle); opacity: .85; }
+.fault-done-group { list-style: none; }
+.fault-done-group summary { cursor: pointer; font-size: 12px; color: var(--muted); padding: 4px 0; }
+.fault-done-group summary:hover { color: var(--text); }

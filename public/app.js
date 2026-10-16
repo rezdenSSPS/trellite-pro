@@ -125,6 +125,8 @@ function connectSSE() {
     evtSource.onmessage = (ev) => {
       let d; try { d = JSON.parse(ev.data); } catch (e) { return; }
       if (d.originator && d.originator === CLIENT_ID) return;
+      // změna u aut ve šichtovnici (mechanik si vzal závadu, poznámka, servis…)
+      if (d.kind === "vozidla") { refreshFleet(); return; }
       clearTimeout(refetchTimer); refetchTimer = setTimeout(refetchState, 180);
     };
     evtSource.onerror = () => { setSync("offline", "Spojení přerušeno – obnovuji…"); };
@@ -689,23 +691,54 @@ function serviceState(v) {
   return { cls: "ok", text: `Servis za ${num(z)} km` };
 }
 const faultAuthor = (id) => String(id || "").startsWith("trello:") ? String(id).slice(7) : (id ? "kurýr " + id : "");
-const FAULT_STATUS = { new: "Nová", in_progress: "Řeší se" };
+const FAULT_STATUS = { new: "Nová", in_progress: "Řeší se", resolved: "Vyřešeno" };
+const FAULT_CHIP = { new: "warn", in_progress: "accent", resolved: "ok" };
+const faultChip = (h) => `<span class="chip ${FAULT_CHIP[h.status] || ""}">${FAULT_STATUS[h.status] || escapeHtml(h.status)}${h.status === "resolved" && h.resolved_at ? " " + escapeHtml(fmtDate(h.resolved_at)) : ""}</span>`;
+function faultItemEl(h, canResolve, spz) {
+  return `<li class="fault ${h.severity === "urgent" && h.status !== "resolved" ? "urgent" : ""} ${h.status}" data-id="${h.id}">
+    <div class="fault-main">
+      <div class="fault-top">${spz ? `<span class="mono fault-spz">${escapeHtml(spz)}</span>` : ""}${faultChip(h)}${h.severity === "urgent" && h.status !== "resolved" ? `<span class="chip danger">Urgentní</span>` : ""}</div>
+      <span class="fault-text">${escapeHtml(h.popis)}</span>
+      <span class="muted-sm">Nahlásil ${escapeHtml(faultAuthor(h.courier_id) || "—")} · ${escapeHtml(fmtDate(h.created_at))}</span>
+      ${h.mechanik_note ? `<span class="fault-note">Mechanik: ${escapeHtml(h.mechanik_note)}</span>` : ""}</div>
+    ${canResolve && h.status !== "resolved" ? `<button class="pill-btn fault-done" data-id="${h.id}" title="Označit jako vyřešené">Vyřešeno</button>` : ""}</li>`;
+}
+// Načte vozidla znovu (po změně ve šichtovnici); server už má čerstvá data
+function refreshFleet() {
+  Object.keys(intData).forEach((k) => { if (k.endsWith(":vozidla")) delete intData[k]; });
+  if (viewMode === "board" && boardTab === "vozidla") renderIntTab();
+}
 function renderFleet(box, data) {
   if (!data.vozidla.length) { box.insertAdjacentHTML("beforeend", `<div class="int-empty">Pro tohle město nejsou ve šichtovnici žádná auta.</div>`); return; }
+  // Přehled všech závad: otevřené (urgentní první), pak vyřešené za 14 dní
+  const all = data.vozidla.flatMap((v) => (v.hlaseni || []).map((h) => ({ h, v })));
+  const rank = (x) => x.h.status === "resolved" ? 2 : x.h.severity === "urgent" ? 0 : 1;
+  all.sort((a, b) => rank(a) - rank(b) || String(b.h.created_at).localeCompare(String(a.h.created_at)));
+  const open = all.filter((x) => x.h.status !== "resolved").length;
+  const sec = document.createElement("section"); sec.className = "fault-overview";
+  sec.innerHTML = `<h3 class="pay-title">Závady <span class="section-count">${open} ${plural(open, "otevřená", "otevřené", "otevřených")}</span></h3>`
+    + (all.length ? `<ul class="fault-list">${all.map((x) => faultItemEl(x.h, data.canResolve, x.v.spz)).join("")}</ul>` : `<p class="muted-sm">Žádné závady za posledních 14 dní.</p>`);
+  bindFaultButtons(sec, data);
+  box.appendChild(sec);
   const grid = document.createElement("div"); grid.className = "car-grid";
   data.vozidla.forEach((v) => grid.appendChild(carCardEl(v, data)));
   box.appendChild(grid);
+}
+function bindFaultButtons(root, data) {
+  root.querySelectorAll(".fault-done").forEach((b) => b.onclick = () => {
+    const v = data.vozidla.find((x) => (x.hlaseni || []).some((h) => String(h.id) === b.dataset.id)); if (!v) return;
+    if (confirm("Označit závadu jako vyřešenou? Zmizí mechanikovi z fronty.")) carWrite(v, "POST", `/hlaseni/${b.dataset.id}/vyreseno`, {}, "Závada uzavřena.");
+  });
 }
 function carCardEl(v, data) {
   const card = document.createElement("div"); card.className = "car-card" + (v.is_active ? "" : " inactive");
   const st = serviceState(v); const s = v.posledni_servis;
   const sinceKm = v.servis_posledni_km && v.km_aktualni != null ? v.km_aktualni - v.servis_posledni_km.km : null;
   const pct = sinceKm != null ? Math.max(0, Math.min(100, Math.round(sinceKm / v.servis_interval_km * 100))) : 0;
-  const faults = (v.hlaseni || []).map((h) => `<li class="fault ${h.severity === "urgent" ? "urgent" : ""}" data-id="${h.id}">
-      <div class="fault-main"><span class="fault-text">${escapeHtml(h.popis)}</span>
-        <span class="muted-sm">${escapeHtml(fmtDate(h.created_at))}${faultAuthor(h.courier_id) ? " · " + escapeHtml(faultAuthor(h.courier_id)) : ""} · ${FAULT_STATUS[h.status] || escapeHtml(h.status)}${h.severity === "urgent" ? " · urgentní" : ""}</span>
-        ${h.mechanik_note ? `<span class="fault-note">Mechanik: ${escapeHtml(h.mechanik_note)}</span>` : ""}</div>
-      ${data.canResolve ? `<button class="pill-btn fault-done" data-id="${h.id}" title="Označit jako vyřešené">Vyřešeno</button>` : ""}</li>`).join("");
+  const openF = (v.hlaseni || []).filter((h) => h.status !== "resolved");
+  const doneF = (v.hlaseni || []).filter((h) => h.status === "resolved");
+  const faults = openF.map((h) => faultItemEl(h, data.canResolve)).join("")
+    + (doneF.length ? `<li class="fault-done-group"><details><summary>Vyřešené za 14 dní (${doneF.length})</summary><ul class="fault-list">${doneF.map((h) => faultItemEl(h, false)).join("")}</ul></details></li>` : "");
   card.innerHTML = `<div class="car-head"><span class="car-spz mono">${escapeHtml(v.spz)}</span>
       ${st ? `<span class="chip ${st.cls}">${st.text}</span>` : `<span class="chip muted">Servis nezadán</span>`}</div>
     <div class="car-label">${escapeHtml(v.label || "Bez označení")}${v.is_active ? "" : " · vyřazené"}</div>
@@ -716,13 +749,11 @@ function carCardEl(v, data) {
     ${v.servis_posledni_km ? `<div class="car-progress" title="Od posledního servisu ${num(sinceKm || 0)} z ${num(v.servis_interval_km)} km"><div class="progress-bar"><div class="progress-fill ${st ? st.cls : ""}" style="width:${pct}%"></div></div></div>` : ""}
     <div class="car-service"><span class="pf-label">Poslední servis</span>${s ? `${escapeHtml(fmtDate(s.datum))} · ${escapeHtml(s.popis)}${s.km ? ` · ${num(s.km)} km` : ""}` : `<span class="muted-sm">zatím nezapsán</span>`}</div>
     ${v.poznamka ? `<div class="car-note">${escapeHtml(v.poznamka)}</div>` : ""}
-    <div class="car-faults"><span class="pf-label">Závady</span>${faults ? `<ul class="fault-list">${faults}</ul>` : `<span class="muted-sm">žádné otevřené</span>`}</div>
+    <div class="car-faults"><span class="pf-label">Závady</span>${openF.length ? "" : `<span class="muted-sm">žádné otevřené</span>`}${faults ? `<ul class="fault-list">${faults}</ul>` : ""}</div>
     <div class="car-actions"><button class="pill-btn car-report">${icon("message", 16)}<span>Nahlásit problém</span></button><button class="pill-btn car-service-btn">${icon("check", 16)}<span>Servis proveden</span></button></div>`;
   card.querySelector(".car-report").onclick = (e) => reportFaultPopover(e.currentTarget, v);
   card.querySelector(".car-service-btn").onclick = (e) => servicePopover(e.currentTarget, v);
-  card.querySelectorAll(".fault-done").forEach((b) => b.onclick = () => {
-    if (confirm("Označit závadu jako vyřešenou? Zmizí mechanikovi z fronty.")) carWrite(v, "POST", `/hlaseni/${b.dataset.id}/vyreseno`, {}, "Závada uzavřena.");
-  });
+  bindFaultButtons(card, data);
   return card;
 }
 async function carWrite(v, method, sub, body, okMsg) {
@@ -1282,8 +1313,8 @@ async function notifyPopover(anchor) {
     }
   }
   body.insertAdjacentHTML("beforeend", `<div class="drawer-section-title">Upozornit mě na</div>`);
-  const prefs = me.notify || { assign: true, comment: true, due: true };
-  [["assign", "Nový přiřazený úkol"], ["comment", "Komentář na mé kartě"], ["due", "Blížící se termín a po termínu"]].forEach(([k, label]) => {
+  const prefs = Object.assign({ assign: true, comment: true, due: true, fault: true }, me.notify || {});
+  [["assign", "Nový přiřazený úkol"], ["comment", "Komentář na mé kartě"], ["due", "Blížící se termín a po termínu"], ["fault", "Postup oprav závad, které jsem nahlásil"]].forEach(([k, label]) => {
     const row = document.createElement("label"); row.className = "notify-opt";
     const cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = prefs[k] !== false;
     cb.onchange = () => mutate("POST", "/account/notify", { [k]: cb.checked }).catch(() => {});

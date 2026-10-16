@@ -255,7 +255,7 @@ function noteComments(card, prevComments, actorId) {
 /* ============================================================
    PUSH UPOZORNĚNÍ (Web Push — iPhone od iOS 16.4 po přidání na plochu)
    ============================================================ */
-const NOTIFY_DEFAULTS = { assign: true, comment: true, due: true };
+const NOTIFY_DEFAULTS = { assign: true, comment: true, due: true, fault: true };
 const notifyPrefs = (u) => Object.assign({}, NOTIFY_DEFAULTS, u.notify || {});
 const cardUrl = (id) => "/#card=" + id;
 let pushReady = false;
@@ -306,9 +306,9 @@ setTimeout(checkDueDates, Math.min(DUE_CHECK_MS, 30e3));
    SSE (živé změny)
    ============================================================ */
 const sseClients = new Set();
-function broadcast(originator) {
+function broadcast(originator, kind) {
   version++;
-  const payload = `data: ${JSON.stringify({ version, originator: originator || null })}\n\n`;
+  const payload = `data: ${JSON.stringify({ version, originator: originator || null, kind: kind || null })}\n\n`;
   for (const res of sseClients) { try { res.write(payload); } catch (e) {} }
 }
 
@@ -740,7 +740,7 @@ app.post("/api/integrace/board/:boardId/vozidla/:carId/servis", requireAuth, asy
   const { datum, km, popis } = req.body || {};
   const kmNum = km === "" || km == null ? undefined : Number(km);
   if (kmNum !== undefined && (!Number.isInteger(kmNum) || kmNum < 0)) return res.status(400).json({ error: "bad_km", message: "Stav km musí být celé kladné číslo." });
-  try { res.json({ vozidlo: await upstreamWrite("smenovnik", "POST", `/vozidla/${ctx.car.id}/servis`, { datum: datum || undefined, km: kmNum, popis, autor: req.user.name }) }); }
+  try { const v = await upstreamWrite("smenovnik", "POST", `/vozidla/${ctx.car.id}/servis`, { datum: datum || undefined, km: kmNum, popis, autor: req.user.name }); broadcast(req.header("x-client-id"), "vozidla"); res.json({ vozidlo: v }); }
   catch (e) { writeError(res, e); }
 });
 
@@ -748,17 +748,64 @@ app.post("/api/integrace/board/:boardId/vozidla/:carId/hlaseni", requireAuth, as
   const ctx = await fleetCar(req, res); if (!ctx) return;
   const popis = String((req.body || {}).popis || "").trim();
   if (!popis) return res.status(400).json({ error: "empty", message: "Popište prosím problém." });
-  try { res.json({ vozidlo: await upstreamWrite("smenovnik", "POST", `/vozidla/${ctx.car.id}/hlaseni`, { popis, severity: req.body.severity === "urgent" ? "urgent" : "normal", autor: req.user.name }) }); }
-  catch (e) { writeError(res, e); }
+  try {
+    const v = await upstreamWrite("smenovnik", "POST", `/vozidla/${ctx.car.id}/hlaseni`, { popis, severity: req.body.severity === "urgent" ? "urgent" : "normal", autor: req.user.name });
+    if (v && v.hlaseni_id) {
+      DOC.faultWatch = DOC.faultWatch || {};
+      DOC.faultWatch[v.hlaseni_id] = { userId: req.user.id, boardId: ctx.b.id, spz: v.spz, popis, status: "new", note: "", at: Date.now() };
+      persist();
+    }
+    broadcast(req.header("x-client-id"), "vozidla");
+    res.json({ vozidlo: v });
+  } catch (e) { writeError(res, e); }
 });
 
 // Uzavřít otevřenou závadu auta — jen admin (jinak opravu potvrzuje mechanik ve šichtovnici)
 app.post("/api/integrace/board/:boardId/vozidla/:carId/hlaseni/:id/vyreseno", requireAuth, requireAdmin, async (req, res) => {
   const ctx = await fleetCar(req, res); if (!ctx) return;
-  if (!(ctx.car.hlaseni || []).some((h) => String(h.id) === String(req.params.id))) return res.status(404).json({ error: "not_found" });
-  try { res.json({ vozidlo: await upstreamWrite("smenovnik", "PUT", `/hlaseni/${encodeURIComponent(req.params.id)}`, { status: "resolved" }) }); }
+  if (!(ctx.car.hlaseni || []).some((h) => String(h.id) === String(req.params.id) && h.status !== "resolved")) return res.status(404).json({ error: "not_found" });
+  try { const v = await upstreamWrite("smenovnik", "PUT", `/hlaseni/${encodeURIComponent(req.params.id)}`, { status: "resolved" }); broadcast(req.header("x-client-id"), "vozidla"); res.json({ vozidlo: v }); }
   catch (e) { writeError(res, e); }
 });
+
+/* Hlídač postupu mechanika: šichtovnice nemá webhook, takže se jí Trello
+   periodicky ptá. Při změně závady (mechanik si ji vzal, napsal poznámku,
+   vyřešil ji) obnoví otevřené záložky Vozidla a pošle upozornění tomu, kdo
+   závadu z Trella nahlásil. Ptá se jen, když je někdo online nebo čeká na opravu. */
+const FAULT_POLL_MS = Number(process.env.FAULT_POLL_MS) || 30e3;
+const FAULT_STATUS_TEXT = { new: "Nová", in_progress: "Mechanik si ji vzal a řeší ji", resolved: "Vyřešeno" };
+let faultSignature = null;
+const faultSig = (fleet) => (fleet || []).flatMap((v) => (v.hlaseni || []).map((h) => [h.id, h.status, h.mechanik_note || ""].join(":"))).sort().join("|");
+async function pollFaults() {
+  if (!DOC || !intEnabled("smenovnik")) return;
+  const watch = DOC.faultWatch || {};
+  const waiting = Object.values(watch).some((w) => w.status !== "resolved");
+  if (sseClients.size === 0 && !waiting) return;
+  let fleet;
+  try { fleet = await upstream("smenovnik", "/vozidla", { fresh: true }); } catch (e) { return; }
+  const sig = faultSig(fleet);
+  if (faultSignature !== null && sig !== faultSignature) broadcast(null, "vozidla");
+  faultSignature = sig;
+  // upozornění autorovi závady
+  const byId = new Map(); fleet.forEach((v) => (v.hlaseni || []).forEach((h) => byId.set(String(h.id), { h, v })));
+  let changed = false;
+  for (const [id, w] of Object.entries(watch)) {
+    const f = byId.get(String(id));
+    if (!f) { if (Date.now() - (w.at || 0) > 30 * 864e5) { delete watch[id]; changed = true; } continue; }
+    const note = f.h.mechanik_note || "";
+    if (f.h.status === w.status && note === w.note) continue;
+    const u = findUser(w.userId);
+    if (u) {
+      const parts = [];
+      if (f.h.status !== w.status) parts.push(FAULT_STATUS_TEXT[f.h.status] || f.h.status);
+      if (note && note !== w.note) parts.push("Mechanik: " + (note.length > 120 ? note.slice(0, 117) + "…" : note));
+      notifyUser(u, "fault", { title: "Závada · " + f.v.spz, body: `${w.popis.length > 60 ? w.popis.slice(0, 57) + "…" : w.popis} — ${parts.join(" · ")}`, url: "/", tag: "fault-" + id });
+    }
+    w.status = f.h.status; w.note = note; changed = true;
+  }
+  if (changed) persist();
+}
+setInterval(() => { pollFaults().catch((e) => console.error("pollFaults", e)); }, FAULT_POLL_MS);
 
 // PDF smlouvy — jen pro toho, kdo smí vidět lidi aspoň v jednom městě ze smlouvy
 app.get("/api/integrace/smlouva/:id", requireAuth, async (req, res) => {
