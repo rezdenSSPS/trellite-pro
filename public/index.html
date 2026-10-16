@@ -140,14 +140,19 @@
       <h2 class="section-title">Nástěnky</h2>
       <div id="boardsGrid" class="boards-grid"></div>
     </section>
-    <button id="resetSampleBtn" class="reset-sample" hidden>Obnovit ukázková data</button>
   </main>
+
+  <!-- Záložky městské nástěnky (Úkoly / Lidé / Výplaty / Vozidla) -->
+  <nav id="boardTabs" class="board-tabs" role="tablist" aria-label="Části nástěnky" hidden></nav>
 
   <!-- Jedna nástěnka -->
   <main id="boardView" class="board-view" hidden>
     <div id="lists" class="lists"></div>
     <button id="addListBtn" class="add-list-btn" hidden>+ Přidat seznam</button>
   </main>
+
+  <!-- Data ze šichtovnice a podpisů -->
+  <main id="intView" class="int-view" hidden></main>
 
   <!-- Správa uživatelů (admin) -->
   <main id="adminView" class="admin-view" hidden>
@@ -184,6 +189,14 @@
       </div>
       <div id="drawerBody" class="drawer-body"></div>
     </aside>
+  </div>
+
+  <!-- Profil člověka (šichtovnice + podpisy) -->
+  <div id="personOverlay" class="modal-overlay" hidden>
+    <div class="modal person-modal" role="dialog" aria-modal="true" aria-labelledby="personName">
+      <button id="personClose" class="modal-close" aria-label="Zavřít">×</button>
+      <div id="personBody"></div>
+    </div>
   </div>
 
   <div id="popover" class="popover" hidden></div>

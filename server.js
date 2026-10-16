@@ -563,10 +563,155 @@ app.post("/api/users/:id/password", requireAuth, requireAdmin, (req, res) => {
   u.passwordHash = bcrypt.hashSync(String(req.body.password), 10); persist(); res.json({ ok: true });
 });
 
-/* reset ukázkových dat (admin) — vytvoří nový dokument, je nutné se znovu přihlásit */
-app.post("/api/reset-sample", requireAuth, requireAdmin, (req, res) => {
-  DOC = seed(); broadcast(null); storage.set(DOC);
-  res.clearCookie("tok"); res.json({ ok: true, reload: true });
+
+/* ============================================================
+   INTEGRACE — šichtovnice (kurýři, výplaty, vozidla) + podpisy (smlouvy, testy)
+   Data se tahají server-to-server s klíčem; prohlížeč nikdy klíč nevidí.
+   ============================================================ */
+const INT = {
+  smenovnik: { url: (process.env.SMENOVNIK_URL || "").replace(/\/$/, ""), key: process.env.SMENOVNIK_KEY || "" },
+  podpisy: { url: (process.env.PODPISY_URL || "").replace(/\/$/, ""), key: process.env.PODPISY_KEY || "" },
+};
+const intEnabled = (s) => !!(INT[s].url && INT[s].key);
+const intLinks = () => ({ smenovnik: INT.smenovnik.url || null, podpisy: INT.podpisy.url || null });
+const slug = (t) => String(t || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
+// "Jan Novák" i "Novák Jan" → stejný klíč (párování kurýra se smlouvou, když chybí ID)
+const nameKey = (t) => String(t || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().split(/[^a-z]+/).filter(Boolean).sort().join(" ");
+// Benešov a Vlašim sdílí vozový park
+const FLEET = { benesov: ["benesov", "vlasim"], vlasim: ["benesov", "vlasim"] };
+
+const intCache = new Map();
+async function upstream(service, pathQ, { ttl = 60e3, fresh = false } = {}) {
+  if (!intEnabled(service)) throw new Error("not_configured");
+  const key = service + pathQ;
+  const hit = intCache.get(key);
+  if (!fresh && hit && hit.exp > Date.now()) return hit.data;
+  const s = INT[service];
+  const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), 25e3);
+  try {
+    const r = await fetch(s.url + "/api/integrace" + pathQ, { headers: { "x-integrace-key": s.key }, signal: ctrl.signal });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json();
+    intCache.set(key, { data, exp: Date.now() + ttl });
+    return data;
+  } finally { clearTimeout(timer); }
+}
+const upstreamError = (e) => (e && e.message === "not_configured") ? "Propojení není nastavené." : "Služba je nedostupná (" + (e && e.name === "AbortError" ? "vypršel čas" : e && e.message) + ").";
+
+async function intCities() {
+  if (!intEnabled("smenovnik")) return [];
+  try { return await upstream("smenovnik", "/mesta", { ttl: 5 * 60e3 }); } catch (e) { return []; }
+}
+// Záložka je vázaná na stejnojmenný seznam: kdo má skrytý seznam „Vozidla“, nevidí ani vozidla
+// ze šichtovnice. Nástěnka bez takového seznamu záložku nijak neomezuje.
+function tabAllowed(u, b, listTitle) {
+  const l = b.lists.find((x) => !x.archived && slug(x.title) === slug(listTitle));
+  return !l || !listHidden(u, b, l);
+}
+async function intBoard(req, res) {
+  const b = findBoard(req.params.boardId);
+  if (!b || b.archived || !canSeeBoard(req.user, b)) { res.status(404).json({ error: "not_found" }); return null; }
+  const city = slug(b.title);
+  if (!(await intCities()).includes(city)) { res.status(404).json({ error: "not_integrated" }); return null; }
+  return { b, city };
+}
+
+app.get("/api/integrace/board/:boardId", requireAuth, async (req, res) => {
+  const b = findBoard(req.params.boardId);
+  if (!b || b.archived || !canSeeBoard(req.user, b)) return res.status(404).json({ error: "not_found" });
+  const city = slug(b.title);
+  if (!(await intCities()).includes(city)) return res.json({ city: null, tabs: [] });
+  const tabs = [];
+  if (tabAllowed(req.user, b, "Zaměstnanci")) tabs.push("lide");
+  tabs.push("vyplaty");
+  if (tabAllowed(req.user, b, "Vozidla")) tabs.push("vozidla");
+  res.json({ city, tabs, links: intLinks() });
+});
+
+app.get("/api/integrace/board/:boardId/lide", requireAuth, async (req, res) => {
+  const ctx = await intBoard(req, res); if (!ctx) return;
+  if (!tabAllowed(req.user, ctx.b, "Zaměstnanci")) return res.status(403).json({ error: "forbidden" });
+  const fresh = req.query.refresh === "1";
+  const [kur, sml] = await Promise.allSettled([
+    upstream("smenovnik", "/kuryri?city=" + encodeURIComponent(ctx.city), { fresh }),
+    intEnabled("podpisy") ? upstream("podpisy", "/kuryri", { fresh }) : Promise.reject(new Error("not_configured")),
+  ]);
+  const couriers = kur.status === "fulfilled" ? kur.value : [];
+  const records = sml.status === "fulfilled" ? sml.value : [];
+
+  const people = couriers.map((c) => ({
+    key: "s:" + c.id, smenovnikId: c.id, name: (c.fakturace_name || "").trim() || c.name, shortName: c.name,
+    level: c.level, isRidic: /řidič/i.test(c.level || ""), dayRate: c.day_rate, isActive: c.is_active, role: c.role,
+    phone: c.phone || "", ico: c.ico || "", dic: c.dic || "", invoiceAddress: c.invoice_address || "",
+    bankAccount: c.bank_account || "", since: c.created_at, records: [],
+  }));
+  const byId = new Map(people.map((p) => [p.smenovnikId, p]));
+  const byName = new Map(people.map((p) => [nameKey(p.name), p]));
+  records.forEach((r) => {
+    const p = (r.smenovnikId && byId.get(r.smenovnikId)) || byName.get(nameKey(r.name));
+    if (p) p.records.push(r);
+    else if ((r.cities || []).includes(ctx.city)) {
+      // podepsal, ale ve šichtovnici (zatím) není
+      const np = { key: "p:" + r.id, smenovnikId: null, name: r.name, onlyContract: true, isActive: true, phone: r.phone, bankAccount: "", records: [r] };
+      people.push(np); byName.set(nameKey(r.name), np);
+    }
+  });
+  people.forEach((p) => {
+    p.records.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+    const signed = p.records.filter((r) => r.status === "signed");
+    const contract = signed.find((r) => r.hasPdf) || signed[0] || p.records[0] || null;
+    const withTest = p.records.find((r) => r.test);
+    p.contract = contract ? { id: contract.id, type: contract.contractType, signedAt: contract.signedAt, status: contract.status, hasPdf: contract.hasPdf } : null;
+    p.test = withTest ? withTest.test : null;
+    p.clothingSize = (p.records.find((r) => r.clothingSize) || {}).clothingSize || "";
+    p.email = (p.records.find((r) => r.email) || {}).email || "";
+    if (!p.phone) p.phone = (p.records.find((r) => r.phone) || {}).phone || "";
+    if (!p.bankAccount) p.bankAccount = (p.records.find((r) => r.bankAccount) || {}).bankAccount || "";
+    delete p.records;
+  });
+  people.sort((a, b) => (b.isActive ? 1 : 0) - (a.isActive ? 1 : 0) || a.name.localeCompare(b.name, "cs"));
+  res.json({
+    people, links: intLinks(),
+    errors: { smenovnik: kur.status === "rejected" ? upstreamError(kur.reason) : null, podpisy: sml.status === "rejected" ? upstreamError(sml.reason) : null },
+  });
+});
+
+app.get("/api/integrace/board/:boardId/vyplaty", requireAuth, async (req, res) => {
+  const ctx = await intBoard(req, res); if (!ctx) return;
+  const year = Number(req.query.year), month = Number(req.query.month);
+  if (!year || !month || month < 1 || month > 12) return res.status(400).json({ error: "bad_month" });
+  try {
+    const data = await upstream("smenovnik", `/vyplaty?city=${encodeURIComponent(ctx.city)}&year=${year}&month=${month}`, { ttl: 2 * 60e3, fresh: req.query.refresh === "1" });
+    res.json({ ...data, links: intLinks() });
+  } catch (e) { res.status(502).json({ error: "upstream", message: upstreamError(e) }); }
+});
+
+app.get("/api/integrace/board/:boardId/vozidla", requireAuth, async (req, res) => {
+  const ctx = await intBoard(req, res); if (!ctx) return;
+  if (!tabAllowed(req.user, ctx.b, "Vozidla")) return res.status(403).json({ error: "forbidden" });
+  try {
+    const all = await upstream("smenovnik", "/vozidla", { fresh: req.query.refresh === "1" });
+    const cities = FLEET[ctx.city] || [ctx.city];
+    res.json({ vozidla: all.filter((v) => cities.includes(v.city)), links: intLinks() });
+  } catch (e) { res.status(502).json({ error: "upstream", message: upstreamError(e) }); }
+});
+
+// PDF smlouvy — jen pro toho, kdo smí vidět lidi aspoň v jednom městě ze smlouvy
+app.get("/api/integrace/smlouva/:id", requireAuth, async (req, res) => {
+  if (!intEnabled("podpisy")) return res.status(404).json({ error: "not_configured" });
+  try {
+    const recs = await upstream("podpisy", "/kuryri");
+    const rec = recs.find((r) => r.id === req.params.id);
+    if (!rec || !rec.hasPdf) return res.status(404).json({ error: "not_found" });
+    const allowed = isAdmin(req.user) || DOC.boards.some((b) => !b.archived && canSeeBoard(req.user, b)
+      && (rec.cities || []).includes(slug(b.title)) && tabAllowed(req.user, b, "Zaměstnanci"));
+    if (!allowed) return res.status(403).json({ error: "forbidden" });
+    const r = await fetch(`${INT.podpisy.url}/api/integrace/r/${encodeURIComponent(rec.id)}/pdf`, { headers: { "x-integrace-key": INT.podpisy.key } });
+    if (!r.ok) return res.status(502).json({ error: "upstream" });
+    res.setHeader("Content-Type", "application/pdf");
+    const cd = r.headers.get("content-disposition"); if (cd) res.setHeader("Content-Disposition", cd);
+    res.send(Buffer.from(await r.arrayBuffer()));
+  } catch (e) { res.status(502).json({ error: "upstream", message: upstreamError(e) }); }
 });
 
 app.get("/api/health", (req, res) => res.json({ ok: true }));

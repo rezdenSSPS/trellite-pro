@@ -32,6 +32,31 @@ Frontend funguje i jako čistě offline aplikace — stačí otevřít
 Žádná další konfigurace není potřeba — `PORT` dodává Railway, `DATABASE_URL`
 také.
 
+## Propojení se šichtovnicí a podpisy
+
+Městské nástěnky (podle názvu: Mělník → `melnik`, Benešov → `benesov`, …) mají
+záložky **Úkoly / Lidé / Výplaty / Vozidla**. Data se berou živě:
+
+- **Šichtovnice** (`/api/integrace/*`) – kurýři, výplaty za měsíc (stejný výpočet
+  jako stránka Fakturace), vozidla s posledním servisem a otevřenými závadami.
+- **Podpisy** (`/api/integrace/*`) – smlouvy (PDF), vstupní test, velikost
+  oblečení. S kurýrem se páruje přes ID ze šichtovnice, jinak podle jména.
+
+Trello volá obě služby ze serveru se sdíleným klíčem; prohlížeč klíč nikdy nevidí.
+Záložka se ukáže jen u města, které šichtovnice zná.
+
+| Proměnná | Kde | Hodnota |
+|---|---|---|
+| `SMENOVNIK_URL` | Trello | adresa šichtovnice, např. `https://smenovnik.cz` |
+| `SMENOVNIK_KEY` | Trello | stejná hodnota jako `INTEGRACE_API_KEY` ve šichtovnici |
+| `PODPISY_URL` | Trello | adresa podpisů |
+| `PODPISY_KEY` | Trello | stejná hodnota jako `INTEGRACE_API_KEY` v podpisech |
+| `INTEGRACE_API_KEY` | šichtovnice, podpisy | náhodný tajný klíč (`openssl rand -hex 32`) |
+
+Oprávnění: záložka **Lidé** se řídí viditelností seznamu „Zaměstnanci“ a
+**Vozidla** seznamu „Vozidla“ — komu admin seznam skryje, nevidí ani data.
+**Výplaty** vidí každý, kdo vidí nástěnku.
+
 ## API
 
 | Metoda | Cesta         | Popis                              |

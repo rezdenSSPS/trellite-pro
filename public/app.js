@@ -46,6 +46,9 @@ let state = null, me = null, usersAdmin = null, allBoards = null;
 let currentBoardId = null, activeRef = null, viewMode = "boards";
 let filter = { labels: [], members: [], due: null };
 let dragListId = null;
+// Záložky městské nástěnky: "ukoly" = kanban, ostatní = data ze šichtovnice a podpisů
+let boardTab = "ukoly", intInfo = null, intYM = null;
+const intData = {};
 
 const isAdmin = () => me && me.role === "admin";
 const isMyTasks = () => currentBoardId === "__mytasks__";
@@ -229,7 +232,7 @@ function renderBoardMembers(b) {
 }
 
 function showBoards() {
-  viewMode = "boards"; currentBoardId = null;
+  viewMode = "boards"; currentBoardId = null; hideIntegration();
   el("boardsView").hidden = false; el("boardView").hidden = true; el("adminView").hidden = true;
   el("boardTitle").textContent = ""; el("boardTitle").setAttribute("contenteditable", "false");
   el("boardStar").hidden = true; el("searchWrap").hidden = true; el("searchInput").value = "";
@@ -249,6 +252,7 @@ function openBoard(id) {
   el("menuBtn").hidden = b.virtual ? true : false;
   el("addListBtn").hidden = !(isAdmin() && !b.virtual);
   el("newCardBtn").hidden = !!b.virtual;
+  boardTab = "ukoly"; loadIntInfo(b);
   renderBoard(); renderSidebar();
 }
 
@@ -279,7 +283,6 @@ function renderBoards() {
   state.boards.filter((b) => !b.virtual).sort((a, b) => (b.starred ? 1 : 0) - (a.starred ? 1 : 0)).forEach((b) => grid.appendChild(boardCardEl(b)));
   if (isAdmin()) { const add = document.createElement("button"); add.className = "board-card new"; add.innerHTML = `${icon("plus", 20)}<span>Vytvořit nástěnku</span>`; add.onclick = createBoard; grid.appendChild(add); }
   el("newBoardBtn").hidden = !isAdmin();
-  el("resetSampleBtn").hidden = !isAdmin();
 }
 function taskRowEl(c, l) {
   const row = document.createElement("button"); row.className = "task-row";
@@ -346,6 +349,7 @@ function cardVisible(card) {
 }
 function renderBoard() {
   const b = getBoard(); if (!b) return;
+  if (boardTab !== "ukoly") return renderIntTab();
   renderBoardMembers(b);
   const listsEl = el("lists"); listsEl.innerHTML = "";
   b.lists.filter((l) => !l.archived).forEach((l) => listsEl.appendChild(renderList(l, b)));
@@ -426,6 +430,249 @@ function buildBadges(card) {
   if ((card.attachments || []).length) { has = true; row.insertAdjacentHTML("beforeend", `<span class="card-badge">${icon("clip", 13)} ${card.attachments.length}</span>`); }
   if ((card.memberIds || []).length) { has = true; const mw = document.createElement("div"); mw.className = "card-members"; card.memberIds.forEach((id) => { const m = getMember(id); if (m) mw.appendChild(avatarEl(m, "sm")); }); row.appendChild(mw); }
   return has ? row : null;
+}
+
+/* ============================================================
+   Integrace: Lidé / Výplaty / Vozidla (šichtovnice + podpisy)
+   ============================================================ */
+const TAB_LABELS = { ukoly: "Úkoly", lide: "Lidé", vyplaty: "Výplaty", vozidla: "Vozidla" };
+const CONTRACT_LABEL = { dpp: "DPP", dpc: "DPČ", dpp_dpc: "DPP + DPČ", osvc: "IČO (OSVČ)", zadny: "Bez smlouvy" };
+const czk = (n) => new Intl.NumberFormat("cs-CZ", { style: "currency", currency: "CZK", maximumFractionDigits: 0 }).format(Number(n) || 0);
+const num = (n) => new Intl.NumberFormat("cs-CZ", { maximumFractionDigits: 1 }).format(Number(n) || 0);
+const fmtDate = (v) => v ? new Date(v).toLocaleDateString("cs-CZ", { day: "numeric", month: "numeric", year: "numeric" }) : "";
+const colorFor = (s) => LABEL_COLORS[[...String(s)].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7) % LABEL_COLORS.length];
+
+function hideIntegration() { el("boardTabs").hidden = true; el("intView").hidden = true; closePerson(); }
+
+async function intGet(path) {
+  const r = await fetch("/api/integrace" + path, { credentials: "same-origin" });
+  if (r.status === 401) { showLogin(); throw { unauth: true }; }
+  let j = null; try { j = await r.json(); } catch (e) {}
+  if (!r.ok) throw new Error((j && j.message) || (r.status === 403 ? "Nemáte oprávnění." : "Data se nepodařilo načíst."));
+  return j;
+}
+async function loadIntInfo(b) {
+  intInfo = null; renderBoardTabs();
+  if (b.virtual) return;
+  try { const j = await intGet("/board/" + b.id); if (currentBoardId === b.id && viewMode === "board") { intInfo = j; renderBoardTabs(); } }
+  catch (e) { /* bez propojení zůstává jen kanban */ }
+}
+function renderBoardTabs() {
+  const nav = el("boardTabs");
+  const tabs = intInfo && intInfo.city ? ["ukoly", ...intInfo.tabs] : [];
+  if (!tabs.includes(boardTab)) boardTab = "ukoly";
+  nav.hidden = viewMode !== "board" || tabs.length === 0;
+  nav.innerHTML = "";
+  tabs.forEach((t) => {
+    const b = document.createElement("button"); b.className = "board-tab" + (t === boardTab ? " active" : "");
+    b.setAttribute("role", "tab"); b.setAttribute("aria-selected", String(t === boardTab)); b.textContent = TAB_LABELS[t];
+    b.onclick = () => { if (boardTab !== t) { boardTab = t; renderBoardTabs(); renderBoard(); } };
+    nav.appendChild(b);
+  });
+  if (viewMode !== "board") return;
+  const onTasks = boardTab === "ukoly"; const b = getBoard();
+  el("boardView").hidden = !onTasks; el("intView").hidden = onTasks;
+  el("searchWrap").hidden = !onTasks; el("filterBtn").hidden = !onTasks; el("newCardBtn").hidden = !onTasks || !b || !!b.virtual;
+  if (!onTasks) el("boardMembers").hidden = true;
+}
+
+const intKey = (boardId) => `${boardId}:${boardTab}` + (boardTab === "vyplaty" ? `:${intYM.y}-${intYM.m}` : "");
+async function loadIntTab(fresh) {
+  const b = getBoard(); if (!b) return;
+  const tab = boardTab; const key = intKey(b.id);
+  intData[key] = { loading: true };
+  const qs = new URLSearchParams(); if (tab === "vyplaty") { qs.set("year", intYM.y); qs.set("month", intYM.m); } if (fresh) qs.set("refresh", "1");
+  try { intData[key] = { data: await intGet(`/board/${b.id}/${tab}` + (qs.toString() ? "?" + qs : "")) }; }
+  catch (e) { if (e.unauth) return; intData[key] = { error: e.message }; }
+  if (viewMode === "board" && currentBoardId === b.id && boardTab === tab) renderIntTab();
+}
+function renderIntTab() {
+  const b = getBoard(); if (!b) return;
+  if (!intYM) { const d = new Date(); intYM = { y: d.getFullYear(), m: d.getMonth() + 1 }; }
+  const key = intKey(b.id);
+  if (!intData[key]) loadIntTab();
+  const entry = intData[key];
+  const box = el("intView"); box.innerHTML = "";
+
+  // lišta: název + (měsíc u výplat) + obnovit + odkaz do šichtovnice
+  const bar = document.createElement("div"); bar.className = "int-toolbar";
+  const h = document.createElement("h2"); h.className = "int-title"; h.textContent = TAB_LABELS[boardTab]; bar.appendChild(h);
+  if (entry && entry.data) {
+    const n = boardTab === "lide" ? entry.data.people.length : boardTab === "vozidla" ? entry.data.vozidla.length : entry.data.ridici.length + entry.data.brigadnici.length;
+    const c = document.createElement("span"); c.className = "section-count"; c.textContent = n; h.appendChild(c);
+  }
+  const right = document.createElement("div"); right.className = "int-actions";
+  if (boardTab === "vyplaty") right.appendChild(monthSwitcher());
+  const refresh = document.createElement("button"); refresh.className = "pill-btn"; refresh.innerHTML = `${icon("activity", 16)}<span>Obnovit</span>`;
+  refresh.disabled = !!(entry && entry.loading); refresh.onclick = () => { loadIntTab(true); renderIntTab(); };
+  right.appendChild(refresh);
+  const ext = intInfo && intInfo.links && intInfo.links.smenovnik;
+  if (ext) { const a = document.createElement("a"); a.className = "pill-btn"; a.href = ext; a.target = "_blank"; a.rel = "noopener"; a.innerHTML = `${icon("arrowRight", 16)}<span>Šichtovnice</span>`; right.appendChild(a); }
+  bar.appendChild(right); box.appendChild(bar);
+
+  if (!entry || entry.loading) { box.insertAdjacentHTML("beforeend", `<div class="int-empty">Načítám data…</div>`); return; }
+  if (entry.error) {
+    const err = document.createElement("div"); err.className = "int-banner danger";
+    err.innerHTML = `<span>${escapeHtml(entry.error)}</span>`;
+    const retry = document.createElement("button"); retry.className = "pill-btn"; retry.textContent = "Zkusit znovu"; retry.onclick = () => { loadIntTab(true); renderIntTab(); };
+    err.appendChild(retry); box.appendChild(err); return;
+  }
+  if (boardTab === "lide") renderPeople(box, entry.data);
+  else if (boardTab === "vyplaty") renderPayroll(box, entry.data);
+  else if (boardTab === "vozidla") renderFleet(box, entry.data);
+}
+function monthSwitcher() {
+  const wrap = document.createElement("div"); wrap.className = "month-switch";
+  const label = new Date(intYM.y, intYM.m - 1, 1).toLocaleDateString("cs-CZ", { month: "long", year: "numeric" });
+  const step = (d) => { const t = new Date(intYM.y, intYM.m - 1 + d, 1); intYM = { y: t.getFullYear(), m: t.getMonth() + 1 }; renderIntTab(); };
+  const prev = document.createElement("button"); prev.className = "icon-btn"; prev.setAttribute("aria-label", "Předchozí měsíc"); prev.textContent = "‹"; prev.onclick = () => step(-1);
+  const next = document.createElement("button"); next.className = "icon-btn"; next.setAttribute("aria-label", "Další měsíc"); next.textContent = "›"; next.onclick = () => step(1);
+  const now = new Date(); next.disabled = intYM.y > now.getFullYear() || (intYM.y === now.getFullYear() && intYM.m >= now.getMonth() + 1);
+  const span = document.createElement("span"); span.className = "month-label"; span.textContent = label.charAt(0).toUpperCase() + label.slice(1);
+  wrap.append(prev, span, next); return wrap;
+}
+function intBanner(box, kind, text) { const d = document.createElement("div"); d.className = "int-banner " + kind; d.textContent = text; box.appendChild(d); }
+
+/* ---------- Lidé ---------- */
+function personTypeLabel(p) {
+  if (p.onlyContract) return "Jen smlouva · není ve šichtovnici";
+  if (p.isRidic) return "Řidič OSVČ";
+  return p.level || "Kurýr";
+}
+function renderPeople(box, data) {
+  if (data.errors.smenovnik) intBanner(box, "danger", "Šichtovnice: " + data.errors.smenovnik);
+  if (data.errors.podpisy) intBanner(box, "warn", "Smlouvy a testy teď nejdou načíst – " + data.errors.podpisy);
+  if (!data.people.length) { box.insertAdjacentHTML("beforeend", `<div class="int-empty">V tomhle městě zatím nikdo není.</div>`); return; }
+  const grid = document.createElement("div"); grid.className = "people-grid";
+  data.people.forEach((p) => {
+    const card = document.createElement("button"); card.className = "person-card" + (p.isActive === false ? " inactive" : "");
+    const color = colorFor(p.name);
+    const chips = [];
+    if (p.contract) chips.push(`<span class="chip">${escapeHtml(CONTRACT_LABEL[p.contract.type] || "Smlouva")}</span>`);
+    if (p.test) chips.push(`<span class="chip ${p.test.percent >= 80 ? "ok" : p.test.percent >= 50 ? "warn" : "danger"}">Test ${p.test.percent} %</span>`);
+    if (p.clothingSize) chips.push(`<span class="chip">Vel. ${escapeHtml(p.clothingSize)}</span>`);
+    if (p.isActive === false) chips.push(`<span class="chip muted">Neaktivní</span>`);
+    card.innerHTML = `<span class="avatar lg" style="background:${tint(color, 0.82)};color:${shade(color, 0.45)}">${escapeHtml(initials(p.name))}</span>
+      <span class="person-main"><span class="person-name">${escapeHtml(p.name)}</span><span class="person-sub">${escapeHtml(personTypeLabel(p))}</span>
+      <span class="person-chips">${chips.join("")}</span></span>`;
+    card.onclick = () => openPerson(p, data.links);
+    grid.appendChild(card);
+  });
+  box.appendChild(grid);
+}
+function closePerson() { const o = el("personOverlay"); if (o) { o.hidden = true; el("personBody").innerHTML = ""; } }
+function openPerson(p, links) {
+  const body = el("personBody"); body.innerHTML = "";
+  const color = colorFor(p.name);
+  const field = (label, value, mono) => value ? `<div class="pf"><span class="pf-label">${label}</span><span class="pf-value${mono ? " mono" : ""}">${value}</span></div>` : "";
+  const sec = (title, inner) => inner ? `<section class="person-sec"><h3>${title}</h3>${inner}</section>` : "";
+
+  const contact = field("Telefon", p.phone ? `<a href="tel:${escapeHtml(p.phone.replace(/\s+/g, ""))}">${escapeHtml(p.phone)}</a>` : "")
+    + field("E-mail", p.email ? `<a href="mailto:${escapeHtml(p.email)}">${escapeHtml(p.email)}</a>` : "");
+  const work = field("Typ", escapeHtml(personTypeLabel(p)))
+    + field(p.isRidic ? "Sazba za den" : "", p.isRidic && p.dayRate ? czk(p.dayRate) : "")
+    + field("Ve šichtovnici od", escapeHtml(fmtDate(p.since)))
+    + field("Velikost oblečení", escapeHtml(p.clothingSize));
+  const billing = field("IČO", escapeHtml(p.ico), true) + field("DIČ", escapeHtml(p.dic), true)
+    + field("Sídlo", escapeHtml(p.invoiceAddress)) + field("Bankovní účet", escapeHtml(p.bankAccount), true);
+
+  let contract = "";
+  if (p.contract) {
+    contract = field("Smlouva", escapeHtml(CONTRACT_LABEL[p.contract.type] || "—"))
+      + field("Stav", p.contract.status === "signed" ? "Podepsáno" + (p.contract.signedAt ? " " + escapeHtml(fmtDate(p.contract.signedAt)) : "") : "Čeká na podpis")
+      + (p.contract.hasPdf ? `<a class="primary-btn person-pdf" href="/api/integrace/smlouva/${encodeURIComponent(p.contract.id)}" target="_blank" rel="noopener">${icon("download", 16)}<span>Stáhnout smlouvu (PDF)</span></a>` : "");
+  } else contract = `<p class="empty-note">Ke smlouvě se nepodařilo dohledat záznam v podpisech.</p>`;
+
+  let test = "";
+  if (p.test) {
+    const t = p.test; const cls = t.percent >= 80 ? "ok" : t.percent >= 50 ? "warn" : "danger";
+    const letters = ["A", "B", "C", "D", "E"];
+    test = `<div class="test-head"><span class="test-score ${cls}">${t.percent} %</span><span>Správně ${t.correctCount} z ${t.total}${t.maxPoints ? ` · ${t.points} z ${t.maxPoints} bodů` : ""}<br><span class="muted-sm">${escapeHtml(fmtDate(t.passedAt))}</span></span></div>
+      <ul class="test-review">${(t.detail || []).map((d, i) => `<li class="${d.ok ? "ok" : "bad"}"><span class="tr-mark" aria-label="${d.ok ? "správně" : "špatně"}">${d.ok ? "✓" : "✗"}</span><div>
+        <div class="tr-q">${i + 1}. ${escapeHtml(d.text || "(otázka podle obrázku)")}</div>
+        <div class="tr-a">Odpověděl: ${d.chosen != null ? escapeHtml(letters[d.chosen] + " – " + ((d.options || [])[d.chosen] || "")) : "nezodpovězeno"}</div>
+        ${d.ok ? "" : `<div class="tr-c">Správně: ${escapeHtml(letters[d.correct] + " – " + ((d.options || [])[d.correct] || ""))}</div>`}</div></li>`).join("")}</ul>`;
+  } else test = `<p class="empty-note">Vstupní test neabsolvoval (nebo ho v podpisech nemáme).</p>`;
+
+  const linkBtns = [];
+  if (links && links.smenovnik && p.smenovnikId) linkBtns.push(`<a class="pill-btn" href="${escapeHtml(links.smenovnik)}/kurieri/${encodeURIComponent(p.smenovnikId)}" target="_blank" rel="noopener">${icon("arrowRight", 16)}<span>Profil ve šichtovnici</span></a>`);
+  if (links && links.podpisy && p.contract) linkBtns.push(`<a class="pill-btn" href="${escapeHtml(links.podpisy)}/admin/r/${encodeURIComponent(p.contract.id)}" target="_blank" rel="noopener">${icon("arrowRight", 16)}<span>Záznam v podpisech</span></a>`);
+
+  body.innerHTML = `<div class="person-head">
+      <span class="avatar xl" style="background:${tint(color, 0.82)};color:${shade(color, 0.45)}">${escapeHtml(initials(p.name))}</span>
+      <div><h2 id="personName" class="person-title">${escapeHtml(p.name)}</h2><div class="person-sub">${escapeHtml(personTypeLabel(p))}${p.isActive === false ? " · neaktivní" : ""}</div></div>
+    </div>
+    <div class="person-grid">
+      <div>${sec("Kontakt", contact)}${sec("Práce", work)}${sec("Fakturace a platby", billing)}</div>
+      <div>${sec("Smlouva", contract)}${sec("Vstupní test", test)}</div>
+    </div>
+    ${linkBtns.length ? `<div class="person-links">${linkBtns.join("")}</div>` : ""}`;
+  el("personOverlay").hidden = false;
+}
+el("personClose").onclick = closePerson;
+el("personOverlay").addEventListener("click", (e) => { if (e.target === el("personOverlay")) closePerson(); });
+
+/* ---------- Výplaty ---------- */
+function renderPayroll(box, data) {
+  if (data.foodisError) intBanner(box, "warn", "Zálohy a bonusy za objednávky z Foodisu se nepodařilo načíst – částky jsou bez nich.");
+  const all = [...data.ridici, ...data.brigadnici];
+  if (!all.length) { box.insertAdjacentHTML("beforeend", `<div class="int-empty">V tomhle měsíci zatím nikdo nemá odjeté směny.</div>`); return; }
+  const total = all.reduce((s, r) => s + (Number(r.toPay) || 0), 0);
+  const fines = all.reduce((s, r) => s + (r.bonusItems || []).filter((b) => Number(b.amount) < 0).reduce((a, b) => a + Number(b.amount), 0), 0);
+  const stats = document.createElement("div"); stats.className = "pay-stats";
+  stats.innerHTML = `<div class="stat"><span class="stat-label">K výplatě celkem</span><span class="stat-value">${czk(total)}</span></div>
+    <div class="stat"><span class="stat-label">Lidí s výplatou</span><span class="stat-value">${all.length}</span></div>
+    <div class="stat"><span class="stat-label">Srážky a pokuty</span><span class="stat-value ${fines < 0 ? "neg" : ""}">${czk(fines)}</span></div>`;
+  box.appendChild(stats);
+  if (data.ridici.length) box.appendChild(payTable("Řidiči OSVČ", data.ridici, true, data.pronajemVozidla));
+  if (data.brigadnici.length) box.appendChild(payTable("Brigádníci", data.brigadnici, false));
+}
+function money(n, signed) { const v = Number(n) || 0; return `<span class="money${v < 0 ? " neg" : ""}">${signed && v > 0 ? "+" : ""}${czk(v)}</span>`; }
+function payTable(title, rows, ridic, pronajem) {
+  const sec = document.createElement("section"); sec.className = "pay-section";
+  sec.innerHTML = `<h3 class="pay-title">${title}</h3>`;
+  const wrap = document.createElement("div"); wrap.className = "table-wrap";
+  const table = document.createElement("table"); table.className = "int-table";
+  table.innerHTML = `<thead><tr><th>Jméno</th><th class="num">${ridic ? "Směny" : "Hodiny"}</th><th class="num">${ridic ? "Sazba / den" : "Sazba / h"}</th><th class="num">Vyježděno</th><th class="num">Záloha</th><th class="num">Bonus obj.</th><th class="num">Bonusy / srážky</th><th class="num">K výplatě</th></tr></thead>`;
+  const tb = document.createElement("tbody");
+  rows.slice().sort((a, b) => a.name.localeCompare(b.name, "cs")).forEach((r) => {
+    const tr = document.createElement("tr"); tr.className = "pay-row"; tr.tabIndex = 0;
+    tr.innerHTML = `<td><span class="pay-name">${escapeHtml(r.name)}</span>${r.cities && r.cities.length > 1 ? `<span class="muted-sm"> · ${r.cities.length} města</span>` : ""}</td>
+      <td class="num mono">${num(ridic ? r.totalShifts : r.totalHours)}</td><td class="num mono">${czk(r.rate)}</td><td class="num mono">${czk(r.celkem)}</td>
+      <td class="num mono">${r.zaloha ? money(-r.zaloha) : "—"}</td><td class="num mono">${r.orderBonus ? money(r.orderBonus, true) : "—"}</td>
+      <td class="num mono">${r.manualBonus ? money(r.manualBonus, true) : "—"}</td><td class="num mono strong">${money(r.toPay)}</td>`;
+    const detail = document.createElement("tr"); detail.className = "pay-detail"; detail.hidden = true;
+    const items = (r.bonusItems || []).map((b) => `<li><span>${escapeHtml(b.reason)}</span>${b.amount == null ? `<span class="muted-sm">bez částky</span>` : money(b.amount, true)}</li>`).join("");
+    const shifts = ridic ? `Ranní ${r.morningCount} · Odpolední ${r.afternoonCount} · Celodenní ${r.fulldayCount}` : `${r.shiftCount} ${plural(r.shiftCount, "směna", "směny", "směn")}`;
+    detail.innerHTML = `<td colspan="8"><div class="pay-detail-box">
+      <div><span class="pf-label">Směny</span> ${shifts}</div>
+      <div><span class="pf-label">Bonusy a srážky</span>${items ? `<ul class="bonus-list">${items}</ul>` : ` <span class="muted-sm">žádné</span>`}</div>
+      ${ridic && pronajem ? `<div class="muted-sm">Pronájem vozidla ${czk(pronajem)} je samostatná položka na faktuře – v částce k výplatě není.</div>` : ""}
+      ${r.foodisMatched === false ? `<div class="muted-sm">Kurýr se nespároval s Foodisem – záloha a bonus za objednávky chybí.</div>` : ""}
+    </div></td>`;
+    const toggle = () => { detail.hidden = !detail.hidden; tr.classList.toggle("open", !detail.hidden); };
+    tr.onclick = toggle; tr.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } };
+    tb.append(tr, detail);
+  });
+  table.appendChild(tb); wrap.appendChild(table); sec.appendChild(wrap);
+  return sec;
+}
+
+/* ---------- Vozidla ---------- */
+function renderFleet(box, data) {
+  if (!data.vozidla.length) { box.insertAdjacentHTML("beforeend", `<div class="int-empty">Pro tohle město nejsou ve šichtovnici žádná auta.</div>`); return; }
+  const grid = document.createElement("div"); grid.className = "car-grid";
+  data.vozidla.forEach((v) => {
+    const card = document.createElement("div"); card.className = "car-card" + (v.is_active ? "" : " inactive");
+    const s = v.posledni_servis;
+    card.innerHTML = `<div class="car-head"><span class="car-spz mono">${escapeHtml(v.spz)}</span>
+        ${v.otevrena_hlaseni ? `<span class="chip danger">${v.otevrena_hlaseni} ${plural(v.otevrena_hlaseni, "závada", "závady", "závad")}</span>` : `<span class="chip ok">Bez závad</span>`}</div>
+      <div class="car-label">${escapeHtml(v.label || "Bez označení")}${v.is_active ? "" : " · vyřazené"}</div>
+      ${v.poznamka ? `<div class="car-note">${escapeHtml(v.poznamka)}</div>` : ""}
+      <div class="car-service"><span class="pf-label">Poslední servis</span>${s ? `${escapeHtml(fmtDate(s.datum))} · ${escapeHtml(s.popis)}${s.km ? ` · ${num(s.km)} km` : ""}` : `<span class="muted-sm">zatím nezapsán</span>`}</div>`;
+    grid.appendChild(card);
+  });
+  box.appendChild(grid);
 }
 
 /* ---------- Přetahování ---------- */
@@ -763,7 +1010,7 @@ function renderFilterDrawer(bodyEl, titleEl, board) {
 /* ============================================================
    Správa uživatelů (admin)
    ============================================================ */
-function showAdmin() { if (!isAdmin()) return; viewMode = "admin"; el("boardsView").hidden = true; el("boardView").hidden = true; el("adminView").hidden = false;
+function showAdmin() { if (!isAdmin()) return; viewMode = "admin"; hideIntegration(); el("boardsView").hidden = true; el("boardView").hidden = true; el("adminView").hidden = false;
   el("boardTitle").textContent = ""; el("boardStar").hidden = true; el("searchWrap").hidden = true; el("filterBtn").hidden = true; el("menuBtn").hidden = true;
   el("newCardBtn").hidden = true; el("boardMembers").hidden = true;
   setHeader({ crumb: "Pracovní prostor", title: "Správa uživatelů" }); renderAdmin(); renderSidebar(); }
@@ -837,7 +1084,6 @@ el("searchInput").addEventListener("input", renderBoard);
 el("boardStar").onclick = () => { const b = getBoard(); if (isAdmin() && !b.virtual) mutate("PATCH", "/boards/" + b.id, { starred: !b.starred }); };
 el("boardTitle").addEventListener("blur", () => { const b = getBoard(); if (!b || !isAdmin() || b.virtual) return; const t = el("boardTitle").textContent.trim() || b.title; if (t !== b.title) mutate("PATCH", "/boards/" + b.id, { title: t }); });
 el("boardTitle").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); el("boardTitle").blur(); } });
-el("resetSampleBtn").onclick = () => { if (confirm("Obnovit ukázková data? Nahradí to VŠE a budete se muset znovu přihlásit.")) api("POST", "/reset-sample").then((j) => { if (j && j.reload) location.reload(); }).catch(() => {}); };
 
 el("sideUser").onclick = (e) => el("userBtn").onclick(e);
 el("userBtn").onclick = (e) => {
@@ -857,7 +1103,7 @@ function changePassword() {
 }
 async function logout() { try { await fetch("/api/logout", { method: "POST", credentials: "same-origin" }); } catch (e) {} if (evtSource) { evtSource.close(); evtSource = null; } me = null; state = null; showLogin(); }
 
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") { if (!el("popover").hidden) return closePopover(); if (!el("modalOverlay").hidden) return closeModal(); if (!el("drawerOverlay").hidden) return closeDrawer(); } });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") { if (!el("popover").hidden) return closePopover(); if (!el("personOverlay").hidden) return closePerson(); if (!el("modalOverlay").hidden) return closeModal(); if (!el("drawerOverlay").hidden) return closeDrawer(); } });
 
 /* ============================================================
    Push upozornění
