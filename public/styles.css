@@ -572,7 +572,10 @@ button, input, textarea, select { font-family: inherit; }
 .admin-board-access { margin-bottom: 10px; }
 .admin-check { display: inline-flex; align-items: center; gap: 8px; font-weight: 500; font-size: 14px; cursor: pointer; }
 .admin-check input { width: 16px; height: 16px; accent-color: var(--accent); }
-.admin-list-hide { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 4px 24px; }
+.admin-tab-access { margin: 8px 0 4px 24px; }
+.admin-sub-label { display: block; width: 100%; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 2px; }
+.admin-list-hide { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 8px 0 4px 24px; }
+.admin-tab-access .admin-list-hide { margin: 2px 0 0; }
 .admin-hide-chip { display: inline-flex; align-items: center; gap: 6px; background: var(--field); border: 1px solid var(--border); border-radius: 999px; padding: 4px 10px; font-size: 13px; cursor: pointer; }
 .admin-hide-chip.hidden { opacity: 0.5; }
 .admin-hide-chip input { width: 14px; height: 14px; accent-color: var(--accent); }

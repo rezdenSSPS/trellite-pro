@@ -459,8 +459,8 @@ async function loadIntInfo(b) {
 }
 function renderBoardTabs() {
   const nav = el("boardTabs");
-  const tabs = intInfo && intInfo.city ? ["ukoly", ...intInfo.tabs] : [];
-  if (!tabs.includes(boardTab)) boardTab = "ukoly";
+  const tabs = intInfo && intInfo.city ? intInfo.tabs : [];
+  if (!tabs.includes(boardTab)) boardTab = tabs[0] || "ukoly";
   nav.hidden = viewMode !== "board" || tabs.length === 0;
   nav.innerHTML = "";
   tabs.forEach((t) => {
@@ -1044,7 +1044,21 @@ function renderAdmin() {
         const cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = sees;
         cb.onchange = () => { const na = JSON.parse(JSON.stringify(u.access)); if (cb.checked) na[b.id] = { hidden: [] }; else delete na[b.id]; mutate("PATCH", "/users/" + u.id, { access: na }); };
         top.append(cb, document.createTextNode(" " + b.title)); brow.appendChild(top);
+        if (sees) {
+          const tabsWrap = document.createElement("div"); tabsWrap.className = "admin-tab-access";
+          tabsWrap.insertAdjacentHTML("beforeend", `<span class="admin-sub-label">Záložky:</span>`);
+          const tabChips = document.createElement("div"); tabChips.className = "admin-list-hide";
+          Object.entries(TAB_LABELS).forEach(([key, label]) => {
+            const hidden = (access.hiddenTabs || []).includes(key);
+            const lbl = document.createElement("label"); lbl.className = "admin-hide-chip" + (hidden ? " hidden" : "");
+            const tc = document.createElement("input"); tc.type = "checkbox"; tc.checked = !hidden; // zaškrtnuto = vidí
+            tc.onchange = () => { const na = JSON.parse(JSON.stringify(u.access)); const h = new Set(na[b.id].hiddenTabs || []); if (tc.checked) h.delete(key); else h.add(key); na[b.id].hiddenTabs = [...h]; mutate("PATCH", "/users/" + u.id, { access: na }); };
+            lbl.append(tc, document.createTextNode(" " + label)); tabChips.appendChild(lbl);
+          });
+          tabsWrap.appendChild(tabChips); brow.appendChild(tabsWrap);
+        }
         if (sees) { const lists = document.createElement("div"); lists.className = "admin-list-hide";
+          lists.insertAdjacentHTML("beforeend", `<span class="admin-sub-label">Seznamy:</span>`);
           b.lists.forEach((l) => { const hidden = (access.hidden || []).includes(l.id); const lbl = document.createElement("label"); lbl.className = "admin-hide-chip" + (hidden ? " hidden" : "");
             const lc = document.createElement("input"); lc.type = "checkbox"; lc.checked = !hidden; // zaškrtnuto = vidí
             lc.onchange = () => { const na = JSON.parse(JSON.stringify(u.access)); const h = new Set(na[b.id].hidden || []); if (lc.checked) h.delete(l.id); else h.add(l.id); na[b.id].hidden = [...h]; mutate("PATCH", "/users/" + u.id, { access: na }); };

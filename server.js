@@ -608,6 +608,13 @@ function tabAllowed(u, b, listTitle) {
   const l = b.lists.find((x) => !x.archived && slug(x.title) === slug(listTitle));
   return !l || !listHidden(u, b, l);
 }
+// Explicitní oprávnění na záložky města (Úkoly / Lidé / Výplaty / Vozidla),
+// nastavované v profilu uživatele. Admin vidí vždy vše.
+function tabVisible(u, b, key) {
+  if (isAdmin(u)) return true;
+  const a = u.access[b.id];
+  return !(a && a.hiddenTabs || []).includes(key);
+}
 async function intBoard(req, res) {
   const b = findBoard(req.params.boardId);
   if (!b || b.archived || !canSeeBoard(req.user, b)) { res.status(404).json({ error: "not_found" }); return null; }
@@ -622,15 +629,16 @@ app.get("/api/integrace/board/:boardId", requireAuth, async (req, res) => {
   const city = slug(b.title);
   if (!(await intCities()).includes(city)) return res.json({ city: null, tabs: [] });
   const tabs = [];
-  if (tabAllowed(req.user, b, "Zaměstnanci")) tabs.push("lide");
-  tabs.push("vyplaty");
-  if (tabAllowed(req.user, b, "Vozidla")) tabs.push("vozidla");
+  if (tabVisible(req.user, b, "ukoly")) tabs.push("ukoly");
+  if (tabAllowed(req.user, b, "Zaměstnanci") && tabVisible(req.user, b, "lide")) tabs.push("lide");
+  if (tabVisible(req.user, b, "vyplaty")) tabs.push("vyplaty");
+  if (tabAllowed(req.user, b, "Vozidla") && tabVisible(req.user, b, "vozidla")) tabs.push("vozidla");
   res.json({ city, tabs, links: intLinks() });
 });
 
 app.get("/api/integrace/board/:boardId/lide", requireAuth, async (req, res) => {
   const ctx = await intBoard(req, res); if (!ctx) return;
-  if (!tabAllowed(req.user, ctx.b, "Zaměstnanci")) return res.status(403).json({ error: "forbidden" });
+  if (!tabAllowed(req.user, ctx.b, "Zaměstnanci") || !tabVisible(req.user, ctx.b, "lide")) return res.status(403).json({ error: "forbidden" });
   const fresh = req.query.refresh === "1";
   const [kur, sml] = await Promise.allSettled([
     upstream("smenovnik", "/kuryri?city=" + encodeURIComponent(ctx.city), { fresh }),
@@ -678,6 +686,7 @@ app.get("/api/integrace/board/:boardId/lide", requireAuth, async (req, res) => {
 
 app.get("/api/integrace/board/:boardId/vyplaty", requireAuth, async (req, res) => {
   const ctx = await intBoard(req, res); if (!ctx) return;
+  if (!tabVisible(req.user, ctx.b, "vyplaty")) return res.status(403).json({ error: "forbidden" });
   const year = Number(req.query.year), month = Number(req.query.month);
   if (!year || !month || month < 1 || month > 12) return res.status(400).json({ error: "bad_month" });
   try {
@@ -688,7 +697,7 @@ app.get("/api/integrace/board/:boardId/vyplaty", requireAuth, async (req, res) =
 
 app.get("/api/integrace/board/:boardId/vozidla", requireAuth, async (req, res) => {
   const ctx = await intBoard(req, res); if (!ctx) return;
-  if (!tabAllowed(req.user, ctx.b, "Vozidla")) return res.status(403).json({ error: "forbidden" });
+  if (!tabAllowed(req.user, ctx.b, "Vozidla") || !tabVisible(req.user, ctx.b, "vozidla")) return res.status(403).json({ error: "forbidden" });
   try {
     const all = await upstream("smenovnik", "/vozidla", { fresh: req.query.refresh === "1" });
     const cities = FLEET[ctx.city] || [ctx.city];
