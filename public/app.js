@@ -38,6 +38,7 @@ const ICONS = {
   plus: '<path d="M12 5v14"/><path d="M5 12h14"/>',
   bell: '<path d="M6 9a6 6 0 0 1 12 0c0 6 2.5 7.5 2.5 7.5h-17S6 15 6 9z"/><path d="M10 20a2 2 0 0 0 4 0"/>',
   key: '<circle cx="8" cy="15" r="4"/><path d="M11 12 20 3"/><path d="M17 6l2 2"/><path d="M15 8l2 2"/>',
+  alert: '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
 };
 function icon(name, size = 18) { return `<svg class="icon" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ""}</svg>`; }
 
@@ -749,12 +750,19 @@ function carCardEl(v, data) {
     ${v.servis_posledni_km ? `<div class="car-progress" title="Od posledního servisu ${num(sinceKm || 0)} z ${num(v.servis_interval_km)} km"><div class="progress-bar"><div class="progress-fill ${st ? st.cls : ""}" style="width:${pct}%"></div></div></div>` : ""}
     <div class="car-service"><span class="pf-label">Poslední servis</span>${s ? `${escapeHtml(fmtDate(s.datum))} · ${escapeHtml(s.popis)}${s.km ? ` · ${num(s.km)} km` : ""}` : `<span class="muted-sm">zatím nezapsán</span>`}</div>
     ${v.poznamka ? `<div class="car-note">${escapeHtml(v.poznamka)}</div>` : ""}
-    <div class="car-faults"><span class="pf-label">Závady</span>${openF.length ? "" : `<span class="muted-sm">žádné otevřené</span>`}${faults ? `<ul class="fault-list">${faults}</ul>` : ""}</div>
-    <div class="car-actions"><button class="pill-btn car-report">${icon("message", 16)}<span>Nahlásit problém</span></button><button class="pill-btn car-service-btn">${icon("check", 16)}<span>Servis proveden</span></button></div>`;
+    <div class="car-actions"><button class="pill-btn car-faults-btn${openF.length ? " has-open" : ""}">${icon("alert", 16)}<span>Závady${openF.length ? ` · ${openF.length}` : ""}</span></button><button class="pill-btn car-report">${icon("message", 16)}<span>Nahlásit problém</span></button><button class="pill-btn car-service-btn">${icon("check", 16)}<span>Servis proveden</span></button></div>`;
+  card.querySelector(".car-faults-btn").onclick = (e) => carFaultsPopover(e.currentTarget, v, data, faults, openF.length);
   card.querySelector(".car-report").onclick = (e) => reportFaultPopover(e.currentTarget, v);
   card.querySelector(".car-service-btn").onclick = (e) => servicePopover(e.currentTarget, v);
-  bindFaultButtons(card, data);
   return card;
+}
+function carFaultsPopover(anchor, v, data, faults, openCount) {
+  const body = document.createElement("div"); body.className = "car-faults-pop";
+  body.innerHTML = faults
+    ? `<div class="muted-sm" style="margin-bottom:8px">${openCount ? `${openCount} ${plural(openCount, "otevřená", "otevřené", "otevřených")}` : "Žádné otevřené"}</div><ul class="fault-list">${faults}</ul>`
+    : `<div class="muted-sm">Žádné otevřené závady.</div>`;
+  bindFaultButtons(body, data);
+  popover(anchor, "Závady · " + v.spz, body);
 }
 async function carWrite(v, method, sub, body, okMsg) {
   const b = getBoard(); if (!b) return;

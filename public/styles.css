@@ -761,7 +761,10 @@ a.pill-btn, a.primary-btn { text-decoration: none; }
 .progress-fill.ok { background: var(--ok); }
 .progress-fill.warn { background: #D97706; }
 .progress-fill.danger { background: var(--danger); }
-.car-faults { font-size: 13px; }
+.car-faults-btn.has-open { background: var(--danger-soft); border-color: transparent; color: var(--danger); font-weight: 600; }
+.car-faults-btn.has-open .icon { color: currentColor; }
+.car-faults-pop { min-width: 280px; max-width: 360px; }
+.car-faults-pop .fault-list { max-height: 50vh; overflow-y: auto; }
 .fault-list { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .fault { display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; border-radius: var(--radius-sm); background: var(--subtle); border-left: 3px solid #D97706; }
 .fault.urgent { background: var(--danger-soft); border-left-color: var(--danger); }
