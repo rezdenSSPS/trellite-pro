@@ -828,6 +828,7 @@ function renderModalBody(card) {
 }
 function renderChecklist(card, cl) {
   const section = document.createElement("div");
+  section.dataset.clId = cl.id;
   const done = cl.items.filter((i) => i.done).length; const pct = cl.items.length ? Math.round(done / cl.items.length * 100) : 0;
   const head = document.createElement("div"); head.className = "modal-label"; head.innerHTML = `${icon("check")} <span style="flex:1">${escapeHtml(cl.title)}</span>`;
   const delCl = document.createElement("button"); delCl.className = "c-del"; delCl.textContent = "Smazat"; delCl.onclick = () => { card.checklists = card.checklists.filter((x) => x.id !== cl.id); saveCard(card); renderModalBody(card); renderBoard(); };
@@ -841,7 +842,7 @@ function renderChecklist(card, cl) {
     rowEl.append(cb, txt, rm); bodyWrap.appendChild(rowEl); });
   const form = document.createElement("div"); form.className = "checklist-form"; form.innerHTML = `<input placeholder="Přidat položku…" /><button>Přidat</button>`;
   const input = form.querySelector("input");
-  const add = () => { const t = input.value.trim(); if (!t) return; cl.items.push({ id: uid(), text: t, done: false }); input.value = ""; saveCard(card); renderModalBody(card); renderBoard(); const fresh = section.querySelector(".checklist-form input"); if (fresh) fresh.focus(); };
+  const add = () => { const t = input.value.trim(); if (!t) return; cl.items.push({ id: uid(), text: t, done: false }); input.value = ""; saveCard(card); renderModalBody(card); renderBoard(); const fresh = document.querySelector(`#modalBody [data-cl-id="${cl.id}"] .checklist-form input`); if (fresh) fresh.focus(); };
   form.querySelector("button").onclick = add; input.addEventListener("keydown", (e) => { if (e.key === "Enter") add(); });
   bodyWrap.appendChild(form); section.appendChild(bodyWrap); return section;
 }
