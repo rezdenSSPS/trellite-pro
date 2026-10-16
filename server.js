@@ -597,6 +597,22 @@ async function upstream(service, pathQ, { ttl = 60e3, fresh = false } = {}) {
   } finally { clearTimeout(timer); }
 }
 const upstreamError = (e) => (e && e.message === "not_configured") ? "Propojení není nastavené." : "Služba je nedostupná (" + (e && e.name === "AbortError" ? "vypršel čas" : e && e.message) + ").";
+// Zápis do šichtovnice; chybovou hlášku služby (např. „Zadejte stav km“) předá dál
+async function upstreamWrite(service, method, path, body) {
+  if (!intEnabled(service)) throw new Error("not_configured");
+  const s = INT[service];
+  const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), 25e3);
+  try {
+    const r = await fetch(s.url + "/api/integrace" + path, {
+      method, signal: ctrl.signal,
+      headers: { "x-integrace-key": s.key, "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+    let j = null; try { j = await r.json(); } catch (e) {}
+    if (!r.ok) { const err = new Error((j && j.error) || `HTTP ${r.status}`); err.status = r.status; throw err; }
+    for (const k of intCache.keys()) if (k.startsWith(service + "/vozidla")) intCache.delete(k);
+    return j;
+  } finally { clearTimeout(timer); }
+}
 
 async function intCities() {
   if (!intEnabled("smenovnik")) return [];
@@ -701,8 +717,47 @@ app.get("/api/integrace/board/:boardId/vozidla", requireAuth, async (req, res) =
   try {
     const all = await upstream("smenovnik", "/vozidla", { fresh: req.query.refresh === "1" });
     const cities = FLEET[ctx.city] || [ctx.city];
-    res.json({ vozidla: all.filter((v) => cities.includes(v.city)), links: intLinks() });
+    res.json({ vozidla: all.filter((v) => cities.includes(v.city)), links: intLinks(), canResolve: isAdmin(req.user) });
   } catch (e) { res.status(502).json({ error: "upstream", message: upstreamError(e) }); }
+});
+
+// Zápis k autu smí jen ten, kdo vidí záložku Vozidla, a jen k autu z vozového parku města
+async function fleetCar(req, res) {
+  const ctx = await intBoard(req, res); if (!ctx) return null;
+  if (!tabAllowed(req.user, ctx.b, "Vozidla") || !tabVisible(req.user, ctx.b, "vozidla")) { res.status(403).json({ error: "forbidden" }); return null; }
+  const cities = FLEET[ctx.city] || [ctx.city];
+  const find = (all) => all.find((v) => String(v.id) === String(req.params.carId) && cities.includes(v.city));
+  try {
+    const car = find(await upstream("smenovnik", "/vozidla")) || find(await upstream("smenovnik", "/vozidla", { fresh: true }));
+    if (!car) { res.status(404).json({ error: "not_found" }); return null; }
+    return { ...ctx, car };
+  } catch (e) { res.status(502).json({ error: "upstream", message: upstreamError(e) }); return null; }
+}
+const writeError = (res, e) => res.status(e.status && e.status < 500 ? 400 : 502).json({ error: "upstream", message: e.status && e.status < 500 ? e.message : upstreamError(e) });
+
+app.post("/api/integrace/board/:boardId/vozidla/:carId/servis", requireAuth, async (req, res) => {
+  const ctx = await fleetCar(req, res); if (!ctx) return;
+  const { datum, km, popis } = req.body || {};
+  const kmNum = km === "" || km == null ? undefined : Number(km);
+  if (kmNum !== undefined && (!Number.isInteger(kmNum) || kmNum < 0)) return res.status(400).json({ error: "bad_km", message: "Stav km musí být celé kladné číslo." });
+  try { res.json({ vozidlo: await upstreamWrite("smenovnik", "POST", `/vozidla/${ctx.car.id}/servis`, { datum: datum || undefined, km: kmNum, popis, autor: req.user.name }) }); }
+  catch (e) { writeError(res, e); }
+});
+
+app.post("/api/integrace/board/:boardId/vozidla/:carId/hlaseni", requireAuth, async (req, res) => {
+  const ctx = await fleetCar(req, res); if (!ctx) return;
+  const popis = String((req.body || {}).popis || "").trim();
+  if (!popis) return res.status(400).json({ error: "empty", message: "Popište prosím problém." });
+  try { res.json({ vozidlo: await upstreamWrite("smenovnik", "POST", `/vozidla/${ctx.car.id}/hlaseni`, { popis, severity: req.body.severity === "urgent" ? "urgent" : "normal", autor: req.user.name }) }); }
+  catch (e) { writeError(res, e); }
+});
+
+// Uzavřít otevřenou závadu auta — jen admin (jinak opravu potvrzuje mechanik ve šichtovnici)
+app.post("/api/integrace/board/:boardId/vozidla/:carId/hlaseni/:id/vyreseno", requireAuth, requireAdmin, async (req, res) => {
+  const ctx = await fleetCar(req, res); if (!ctx) return;
+  if (!(ctx.car.hlaseni || []).some((h) => String(h.id) === String(req.params.id))) return res.status(404).json({ error: "not_found" });
+  try { res.json({ vozidlo: await upstreamWrite("smenovnik", "PUT", `/hlaseni/${encodeURIComponent(req.params.id)}`, { status: "resolved" }) }); }
+  catch (e) { writeError(res, e); }
 });
 
 // PDF smlouvy — jen pro toho, kdo smí vidět lidi aspoň v jednom městě ze smlouvy

@@ -435,7 +435,10 @@ function buildBadges(card) {
 /* ============================================================
    Integrace: Lidé / Výplaty / Vozidla (šichtovnice + podpisy)
    ============================================================ */
-const TAB_LABELS = { ukoly: "Úkoly", lide: "Lidé", vyplaty: "Výplaty", vozidla: "Vozidla" };
+const TAB_LABELS = { ukoly: "Úkoly", lide: "Řidiči", vyplaty: "Výplaty", vozidla: "Vozidla" };
+// Vstupní test: pod hranicí kurýr neprošel
+const TEST_PASS = 70;
+const testClass = (pct) => pct < TEST_PASS ? "danger" : pct < 80 ? "warn" : "ok";
 const CONTRACT_LABEL = { dpp: "DPP", dpc: "DPČ", dpp_dpc: "DPP + DPČ", osvc: "IČO (OSVČ)", zadny: "Bez smlouvy" };
 const czk = (n) => new Intl.NumberFormat("cs-CZ", { style: "currency", currency: "CZK", maximumFractionDigits: 0 }).format(Number(n) || 0);
 const num = (n) => new Intl.NumberFormat("cs-CZ", { maximumFractionDigits: 1 }).format(Number(n) || 0);
@@ -539,26 +542,38 @@ function personTypeLabel(p) {
   if (p.isRidic) return "Řidič OSVČ";
   return p.level || "Kurýr";
 }
+// Řidiči OSVČ vlevo, brigádníci (DPP/DPČ) vpravo
+const isDriverCol = (p) => p.isRidic || (p.contract && p.contract.type === "osvc");
 function renderPeople(box, data) {
   if (data.errors.smenovnik) intBanner(box, "danger", "Šichtovnice: " + data.errors.smenovnik);
   if (data.errors.podpisy) intBanner(box, "warn", "Smlouvy a testy teď nejdou načíst – " + data.errors.podpisy);
   if (!data.people.length) { box.insertAdjacentHTML("beforeend", `<div class="int-empty">V tomhle městě zatím nikdo není.</div>`); return; }
-  const grid = document.createElement("div"); grid.className = "people-grid";
-  data.people.forEach((p) => {
-    const card = document.createElement("button"); card.className = "person-card" + (p.isActive === false ? " inactive" : "");
-    const color = colorFor(p.name);
-    const chips = [];
-    if (p.contract) chips.push(`<span class="chip">${escapeHtml(CONTRACT_LABEL[p.contract.type] || "Smlouva")}</span>`);
-    if (p.test) chips.push(`<span class="chip ${p.test.percent >= 80 ? "ok" : p.test.percent >= 50 ? "warn" : "danger"}">Test ${p.test.percent} %</span>`);
-    if (p.clothingSize) chips.push(`<span class="chip">Vel. ${escapeHtml(p.clothingSize)}</span>`);
-    if (p.isActive === false) chips.push(`<span class="chip muted">Neaktivní</span>`);
-    card.innerHTML = `<span class="avatar lg" style="background:${tint(color, 0.82)};color:${shade(color, 0.45)}">${escapeHtml(initials(p.name))}</span>
-      <span class="person-main"><span class="person-name">${escapeHtml(p.name)}</span><span class="person-sub">${escapeHtml(personTypeLabel(p))}</span>
-      <span class="person-chips">${chips.join("")}</span></span>`;
-    card.onclick = () => openPerson(p, data.links);
-    grid.appendChild(card);
+  const cols = document.createElement("div"); cols.className = "people-cols";
+  [
+    { key: "ridici", title: "Řidiči", sub: "OSVČ", people: data.people.filter(isDriverCol) },
+    { key: "brigadnici", title: "Brigádníci", sub: "DPP / DPČ", people: data.people.filter((p) => !isDriverCol(p)) },
+  ].forEach((g) => {
+    const col = document.createElement("section"); col.className = "people-col " + g.key;
+    col.innerHTML = `<h3 class="people-col-head"><span class="people-col-dot" aria-hidden="true"></span>${g.title}<span class="section-count">${g.people.length}</span><span class="muted-sm">${g.sub}</span></h3>`;
+    if (!g.people.length) col.insertAdjacentHTML("beforeend", `<div class="int-empty small">Nikdo</div>`);
+    g.people.forEach((p) => col.appendChild(personCardEl(p, data.links)));
+    cols.appendChild(col);
   });
-  box.appendChild(grid);
+  box.appendChild(cols);
+}
+function personCardEl(p, links) {
+  const card = document.createElement("button"); card.className = "person-card" + (p.isActive === false ? " inactive" : "");
+  const color = colorFor(p.name);
+  const chips = [];
+  if (p.contract) chips.push(`<span class="chip">${escapeHtml(CONTRACT_LABEL[p.contract.type] || "Smlouva")}</span>`);
+  if (p.test) chips.push(`<span class="chip ${testClass(p.test.percent)}">Test ${p.test.percent} %${p.test.percent < TEST_PASS ? " · Neprošel" : ""}</span>`);
+  if (p.clothingSize) chips.push(`<span class="chip">Vel. ${escapeHtml(p.clothingSize)}</span>`);
+  if (p.isActive === false) chips.push(`<span class="chip muted">Neaktivní</span>`);
+  card.innerHTML = `<span class="avatar lg" style="background:${tint(color, 0.82)};color:${shade(color, 0.45)}">${escapeHtml(initials(p.name))}</span>
+    <span class="person-main"><span class="person-name">${escapeHtml(p.name)}</span><span class="person-sub">${escapeHtml(personTypeLabel(p))}</span>
+    <span class="person-chips">${chips.join("")}</span></span>`;
+  card.onclick = () => openPerson(p, links);
+  return card;
 }
 function closePerson() { const o = el("personOverlay"); if (o) { o.hidden = true; el("personBody").innerHTML = ""; } }
 function openPerson(p, links) {
@@ -585,9 +600,9 @@ function openPerson(p, links) {
 
   let test = "";
   if (p.test) {
-    const t = p.test; const cls = t.percent >= 80 ? "ok" : t.percent >= 50 ? "warn" : "danger";
+    const t = p.test; const cls = testClass(t.percent);
     const letters = ["A", "B", "C", "D", "E"];
-    test = `<div class="test-head"><span class="test-score ${cls}">${t.percent} %</span><span>Správně ${t.correctCount} z ${t.total}${t.maxPoints ? ` · ${t.points} z ${t.maxPoints} bodů` : ""}<br><span class="muted-sm">${escapeHtml(fmtDate(t.passedAt))}</span></span></div>
+    test = `<div class="test-head"><span class="test-score ${cls}">${t.percent} %</span>${t.percent < TEST_PASS ? `<span class="chip danger">Neprošel (pod ${TEST_PASS} %)</span>` : ""}<span>Správně ${t.correctCount} z ${t.total}${t.maxPoints ? ` · ${t.points} z ${t.maxPoints} bodů` : ""}<br><span class="muted-sm">${escapeHtml(fmtDate(t.passedAt))}</span></span></div>
       <ul class="test-review">${(t.detail || []).map((d, i) => `<li class="${d.ok ? "ok" : "bad"}"><span class="tr-mark" aria-label="${d.ok ? "správně" : "špatně"}">${d.ok ? "✓" : "✗"}</span><div>
         <div class="tr-q">${i + 1}. ${escapeHtml(d.text || "(otázka podle obrázku)")}</div>
         <div class="tr-a">Odpověděl: ${d.chosen != null ? escapeHtml(letters[d.chosen] + " – " + ((d.options || [])[d.chosen] || "")) : "nezodpovězeno"}</div>
@@ -659,20 +674,98 @@ function payTable(title, rows, ridic, pronajem) {
 }
 
 /* ---------- Vozidla ---------- */
+async function intSend(method, path, body) {
+  const r = await fetch("/api/integrace" + path, { method, credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
+  if (r.status === 401) { showLogin(); throw { unauth: true }; }
+  let j = null; try { j = await r.json(); } catch (e) {}
+  if (!r.ok) throw new Error((j && j.message) || (r.status === 403 ? "Nemáte oprávnění." : "Nepodařilo se uložit."));
+  return j;
+}
+function serviceState(v) {
+  const z = v.servis_zbyva_km;
+  if (z == null) return null;
+  if (z <= 0) return { cls: "danger", text: `Servis po termínu o ${num(-z)} km` };
+  if (z <= 1500) return { cls: "warn", text: `Servis za ${num(z)} km` };
+  return { cls: "ok", text: `Servis za ${num(z)} km` };
+}
+const faultAuthor = (id) => String(id || "").startsWith("trello:") ? String(id).slice(7) : (id ? "kurýr " + id : "");
+const FAULT_STATUS = { new: "Nová", in_progress: "Řeší se" };
 function renderFleet(box, data) {
   if (!data.vozidla.length) { box.insertAdjacentHTML("beforeend", `<div class="int-empty">Pro tohle město nejsou ve šichtovnici žádná auta.</div>`); return; }
   const grid = document.createElement("div"); grid.className = "car-grid";
-  data.vozidla.forEach((v) => {
-    const card = document.createElement("div"); card.className = "car-card" + (v.is_active ? "" : " inactive");
-    const s = v.posledni_servis;
-    card.innerHTML = `<div class="car-head"><span class="car-spz mono">${escapeHtml(v.spz)}</span>
-        ${v.otevrena_hlaseni ? `<span class="chip danger">${v.otevrena_hlaseni} ${plural(v.otevrena_hlaseni, "závada", "závady", "závad")}</span>` : `<span class="chip ok">Bez závad</span>`}</div>
-      <div class="car-label">${escapeHtml(v.label || "Bez označení")}${v.is_active ? "" : " · vyřazené"}</div>
-      ${v.poznamka ? `<div class="car-note">${escapeHtml(v.poznamka)}</div>` : ""}
-      <div class="car-service"><span class="pf-label">Poslední servis</span>${s ? `${escapeHtml(fmtDate(s.datum))} · ${escapeHtml(s.popis)}${s.km ? ` · ${num(s.km)} km` : ""}` : `<span class="muted-sm">zatím nezapsán</span>`}</div>`;
-    grid.appendChild(card);
-  });
+  data.vozidla.forEach((v) => grid.appendChild(carCardEl(v, data)));
   box.appendChild(grid);
+}
+function carCardEl(v, data) {
+  const card = document.createElement("div"); card.className = "car-card" + (v.is_active ? "" : " inactive");
+  const st = serviceState(v); const s = v.posledni_servis;
+  const sinceKm = v.servis_posledni_km && v.km_aktualni != null ? v.km_aktualni - v.servis_posledni_km.km : null;
+  const pct = sinceKm != null ? Math.max(0, Math.min(100, Math.round(sinceKm / v.servis_interval_km * 100))) : 0;
+  const faults = (v.hlaseni || []).map((h) => `<li class="fault ${h.severity === "urgent" ? "urgent" : ""}" data-id="${h.id}">
+      <div class="fault-main"><span class="fault-text">${escapeHtml(h.popis)}</span>
+        <span class="muted-sm">${escapeHtml(fmtDate(h.created_at))}${faultAuthor(h.courier_id) ? " · " + escapeHtml(faultAuthor(h.courier_id)) : ""} · ${FAULT_STATUS[h.status] || escapeHtml(h.status)}${h.severity === "urgent" ? " · urgentní" : ""}</span>
+        ${h.mechanik_note ? `<span class="fault-note">Mechanik: ${escapeHtml(h.mechanik_note)}</span>` : ""}</div>
+      ${data.canResolve ? `<button class="pill-btn fault-done" data-id="${h.id}" title="Označit jako vyřešené">Vyřešeno</button>` : ""}</li>`).join("");
+  card.innerHTML = `<div class="car-head"><span class="car-spz mono">${escapeHtml(v.spz)}</span>
+      ${st ? `<span class="chip ${st.cls}">${st.text}</span>` : `<span class="chip muted">Servis nezadán</span>`}</div>
+    <div class="car-label">${escapeHtml(v.label || "Bez označení")}${v.is_active ? "" : " · vyřazené"}</div>
+    <div class="car-stats">
+      <div><span class="pf-label">Stav tachometru</span><span class="mono">${v.km_aktualni != null ? num(v.km_aktualni) + " km" : "—"}</span>${v.km_datum ? `<span class="muted-sm">k ${escapeHtml(fmtDate(v.km_datum))}</span>` : ""}</div>
+      <div><span class="pf-label">Najeto za 30 dní</span><span class="mono">${v.najeto_30_dni != null ? num(v.najeto_30_dni) + " km" : "—"}</span></div>
+    </div>
+    ${v.servis_posledni_km ? `<div class="car-progress" title="Od posledního servisu ${num(sinceKm || 0)} z ${num(v.servis_interval_km)} km"><div class="progress-bar"><div class="progress-fill ${st ? st.cls : ""}" style="width:${pct}%"></div></div></div>` : ""}
+    <div class="car-service"><span class="pf-label">Poslední servis</span>${s ? `${escapeHtml(fmtDate(s.datum))} · ${escapeHtml(s.popis)}${s.km ? ` · ${num(s.km)} km` : ""}` : `<span class="muted-sm">zatím nezapsán</span>`}</div>
+    ${v.poznamka ? `<div class="car-note">${escapeHtml(v.poznamka)}</div>` : ""}
+    <div class="car-faults"><span class="pf-label">Závady</span>${faults ? `<ul class="fault-list">${faults}</ul>` : `<span class="muted-sm">žádné otevřené</span>`}</div>
+    <div class="car-actions"><button class="pill-btn car-report">${icon("message", 16)}<span>Nahlásit problém</span></button><button class="pill-btn car-service-btn">${icon("check", 16)}<span>Servis proveden</span></button></div>`;
+  card.querySelector(".car-report").onclick = (e) => reportFaultPopover(e.currentTarget, v);
+  card.querySelector(".car-service-btn").onclick = (e) => servicePopover(e.currentTarget, v);
+  card.querySelectorAll(".fault-done").forEach((b) => b.onclick = () => {
+    if (confirm("Označit závadu jako vyřešenou? Zmizí mechanikovi z fronty.")) carWrite(v, "POST", `/hlaseni/${b.dataset.id}/vyreseno`, {}, "Závada uzavřena.");
+  });
+  return card;
+}
+async function carWrite(v, method, sub, body, okMsg) {
+  const b = getBoard(); if (!b) return;
+  try {
+    const j = await intSend(method, `/board/${b.id}/vozidla/${v.id}${sub}`, body);
+    const entry = intData[`${b.id}:vozidla`];
+    if (entry && entry.data && j.vozidlo) entry.data.vozidla = entry.data.vozidla.map((x) => x.id === j.vozidlo.id ? j.vozidlo : x);
+    closePopover(); toast(okMsg); if (boardTab === "vozidla") renderIntTab();
+    return true;
+  } catch (e) { if (!e.unauth) toast(e.message); return false; }
+}
+function reportFaultPopover(anchor, v) {
+  const body = document.createElement("div");
+  body.innerHTML = `<textarea class="pop-input" rows="4" placeholder="Co je s autem v nepořádku?"></textarea>
+    <label class="notify-opt"><input type="checkbox" /> Urgentní – auto nejde použít</label>`;
+  const btn = document.createElement("button"); btn.className = "pop-btn"; btn.textContent = "Odeslat mechanikovi";
+  btn.onclick = async () => {
+    const popis = body.querySelector("textarea").value.trim(); if (!popis) return toast("Popište prosím problém.");
+    btn.disabled = true;
+    const ok = await carWrite(v, "POST", "/hlaseni", { popis, severity: body.querySelector("input").checked ? "urgent" : "normal" }, "Problém nahlášen – mechanik ho uvidí ve šichtovnici.");
+    if (!ok) btn.disabled = false;
+  };
+  body.appendChild(btn);
+  popover(anchor, "Problém · " + v.spz, body);
+  body.querySelector("textarea").focus();
+}
+function servicePopover(anchor, v) {
+  const body = document.createElement("div");
+  body.innerHTML = `<label class="quick-label">Datum servisu</label><input type="date" class="pop-input" value="${toInputDate(Date.now())}">
+    <label class="quick-label">Stav tachometru (km)</label><input type="number" class="pop-input" min="0" step="1" value="${v.km_aktualni != null ? v.km_aktualni : ""}" placeholder="např. 154000">
+    <label class="quick-label">Co se dělalo</label><input class="pop-input" value="Servis" maxlength="200">
+    <p class="muted-sm">Odpočet do dalšího servisu (${num(v.servis_interval_km || 15000)} km) se tím vynuluje. Zápis uvidí i mechanik.</p>`;
+  const btn = document.createElement("button"); btn.className = "pop-btn"; btn.textContent = "Zapsat servis";
+  btn.onclick = async () => {
+    const [d, k, p] = body.querySelectorAll("input");
+    if (k.value !== "" && !(Number.isInteger(Number(k.value)) && Number(k.value) >= 0)) return toast("Stav km musí být celé kladné číslo.");
+    btn.disabled = true;
+    const ok = await carWrite(v, "POST", "/servis", { datum: d.value, km: k.value === "" ? null : Number(k.value), popis: p.value }, "Servis zapsán, odpočet běží znovu.");
+    if (!ok) btn.disabled = false;
+  };
+  body.appendChild(btn);
+  popover(anchor, "Servis proveden · " + v.spz, body);
 }
 
 /* ---------- Přetahování ---------- */

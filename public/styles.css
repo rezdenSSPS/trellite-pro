@@ -741,3 +741,38 @@ a.pill-btn, a.primary-btn { text-decoration: none; }
   .person-grid { grid-template-columns: 1fr; }
   .person-head { margin-right: 44px; }
 }
+
+/* Řidiči: dva sloupce – řidiči OSVČ vlevo, brigádníci vpravo */
+.people-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }
+.people-col { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.people-col-head { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 600; margin: 0 0 4px; padding-bottom: 10px; border-bottom: 2px solid var(--col-color); }
+.people-col-head .muted-sm { margin-left: auto; }
+.people-col-dot { width: 10px; height: 10px; border-radius: 999px; background: var(--col-color); }
+.people-col.ridici { --col-color: var(--accent); }
+.people-col.brigadnici { --col-color: #0D9488; }
+.people-col .person-card { border-left: 4px solid var(--col-color); }
+.int-empty.small { padding: 20px 12px; }
+
+/* Vozidla: tachometr, servis, závady */
+.car-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.car-stats > div { display: flex; flex-direction: column; gap: 1px; font-size: 14px; }
+.car-stats .mono { font-weight: 600; }
+.car-progress .progress-bar { height: 6px; }
+.progress-fill.ok { background: var(--ok); }
+.progress-fill.warn { background: #D97706; }
+.progress-fill.danger { background: var(--danger); }
+.car-faults { font-size: 13px; }
+.fault-list { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.fault { display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; border-radius: var(--radius-sm); background: var(--subtle); border-left: 3px solid #D97706; }
+.fault.urgent { background: var(--danger-soft); border-left-color: var(--danger); }
+.fault-main { display: flex; flex-direction: column; gap: 2px; flex: 1 1 auto; min-width: 0; }
+.fault-text { color: var(--text); font-weight: 500; overflow-wrap: anywhere; }
+.fault-note { color: var(--text-2); font-style: italic; }
+.fault-done { height: 30px; padding: 0 10px; font-size: 12px; flex: 0 0 auto; }
+.car-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; padding-top: 4px; }
+.car-actions .pill-btn { flex: 1 1 auto; justify-content: center; }
+textarea.pop-input { resize: vertical; font: inherit; }
+
+@media (max-width: 900px) {
+  .people-cols { grid-template-columns: 1fr; }
+}
