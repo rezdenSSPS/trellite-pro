@@ -771,7 +771,7 @@ a.pill-btn, a.primary-btn { text-decoration: none; }
 .fault-done { height: 30px; padding: 0 10px; font-size: 12px; flex: 0 0 auto; }
 .car-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; padding-top: 4px; }
 .car-actions .pill-btn { flex: 1 1 auto; justify-content: center; }
-textarea.pop-input { resize: vertical; font: inherit; }
+textarea.pop-input { height: auto; min-height: 96px; padding: 10px 12px; line-height: 1.45; resize: vertical; font: inherit; display: block; }
 
 @media (max-width: 900px) {
   .people-cols { grid-template-columns: 1fr; }
