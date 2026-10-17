@@ -791,3 +791,188 @@ textarea.pop-input { height: auto; min-height: 96px; padding: 10px 12px; line-he
 .fault-done-group { list-style: none; }
 .fault-done-group summary { cursor: pointer; font-size: 12px; color: var(--muted); padding: 4px 0; }
 .fault-done-group summary:hover { color: var(--text); }
+
+/* =====================================================================
+   TELEFON (do 760 px): spodní lišta, panely zespodu, jeden seznam na obrazovku
+   ===================================================================== */
+.mobile-nav, .phone-only, .list-chips, .sheet-backdrop, .pay-mobile-lines, .person-quick { display: none; }
+.mini-switch { width: 36px; height: 22px; border-radius: 999px; background: var(--border-strong); position: relative; flex: 0 0 auto; transition: background .15s; }
+.mini-switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 999px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.25); transition: left .15s; }
+.mini-switch.on { background: #34C759; }
+.mini-switch.on::after { left: 16px; }
+
+@media (max-width: 760px) {
+  :root { --nav-h: calc(64px + env(safe-area-inset-bottom)); }
+  html, body { font-size: 15px; }
+  .main-col { height: 100dvh; }
+  .main-col > main { padding-bottom: calc(var(--nav-h) + 24px) !important; -webkit-overflow-scrolling: touch; }
+  .phone-only:not([hidden]) { display: inline-flex; }
+  #summaryTiles.phone-only { display: grid; }
+
+  /* Spodní navigace */
+  .mobile-nav {
+    display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); align-items: start;
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 80; height: var(--nav-h);
+    padding: 6px 8px env(safe-area-inset-bottom); box-sizing: border-box;
+    background: var(--topbar); border-top: 1px solid var(--border);
+  }
+  .mn-item {
+    position: relative; height: 50px; border: 0; background: transparent; color: var(--muted);
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+    font-size: 11px; font-weight: 500; cursor: pointer; -webkit-tap-highlight-color: transparent;
+  }
+  .mn-item .icon { width: 22px; height: 22px; }
+  .mn-item.active { color: var(--accent); font-weight: 600; }
+  .mn-badge { position: absolute; top: 2px; left: calc(50% + 6px); min-width: 18px; height: 18px; padding: 0 5px; box-sizing: border-box; border-radius: 999px; background: var(--accent); color: var(--accent-ink); font-size: 11px; font-weight: 600; display: flex; align-items: center; justify-content: center; }
+  .mn-add {
+    justify-self: center; width: 52px; height: 52px; border: 0; border-radius: 16px; background: var(--accent); color: var(--accent-ink);
+    display: flex; align-items: center; justify-content: center; box-shadow: 0 6px 16px rgba(79, 70, 229, .35); cursor: pointer;
+  }
+  .mn-add .icon { width: 24px; height: 24px; }
+  .toast { bottom: calc(var(--nav-h) + 12px); }
+
+  /* Hlavička: na telefonu jen zpět, název a hledání */
+  .topbar { padding: 10px 12px; gap: 8px; padding-top: calc(10px + env(safe-area-inset-top)); }
+  .topbar-left { flex: 1 1 100%; gap: 4px; }
+  #themeBtn, #userBtn, #tasksBtn, #newCardBtn, #boardMembers, .crumb, #syncText { display: none !important; }
+  body[data-view="boards"] #homeBtn, body[data-view="admin"] #homeBtn { display: none !important; }
+  .back-btn { border-color: transparent; width: 40px; height: 40px; margin-left: -6px; }
+  .back-btn .icon { width: 22px; height: 22px; }
+  .page-title, .board-title { font-size: 20px; }
+  .board-title { max-width: 52vw; margin-left: 0; padding: 2px 4px; }
+  .city-switch { border: 0; background: transparent; color: var(--muted); width: 32px; height: 36px; margin-left: -4px; align-items: center; justify-content: center; cursor: pointer; }
+  .sync-pill { padding: 0; background: transparent !important; width: 14px; justify-content: center; }
+  .sync-dot { width: 8px; height: 8px; }
+  .topbar-right { width: 100%; margin-left: 0; gap: 8px; flex-wrap: nowrap; }
+  body[data-view="boards"] .topbar-right, body[data-view="admin"] .topbar-right { display: none; }
+  .search-wrap { flex: 1 1 auto; }
+  .search { width: 100%; height: 40px; }
+  #filterBtn { height: 40px; padding: 0 12px; }
+  #menuBtn { width: 40px; height: 40px; position: absolute; top: calc(10px + env(safe-area-inset-top)); right: 12px; border-color: transparent; }
+  .topbar-right:not(:has(> :not([hidden]):not(#menuBtn):not(#themeBtn):not(#userBtn):not(#tasksBtn):not(#newCardBtn):not(#boardMembers))) { height: 0; margin-top: -8px; }
+
+  /* Přehled */
+  .boards-view { padding: 16px 16px 0; }
+  .welcome { margin-bottom: 16px; }
+  .welcome-title { font-size: 26px; }
+  .welcome .primary-btn { display: none; }
+  .summary-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 20px; }
+  .summary-tile { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 12px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface-2); color: var(--text-2); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+  .summary-tile.danger { background: var(--danger-soft); border-color: transparent; color: var(--danger); }
+  .summary-num { font-family: var(--mono); font-size: 22px; font-weight: 500; color: inherit; }
+  .summary-tile:not(.danger) .summary-num { color: var(--text); }
+  .push-hint { margin-bottom: 20px; padding: 14px; gap: 10px; }
+  .push-hint .primary-btn { height: 40px; }
+  .ov-section { margin-bottom: 24px; }
+  .section-title { font-size: 17px; }
+  .task-row { flex-wrap: nowrap; min-height: 64px; padding: 10px 14px; }
+  .task-title { flex: 1 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .task-board { display: none; }
+  .boards-grid { grid-template-columns: 1fr; gap: 8px; }
+  .board-card { flex-direction: row; align-items: center; gap: 12px; padding: 12px 14px; min-height: 68px; }
+  .board-card:hover { transform: none; }
+  .board-card .bc-head { flex: 1 1 auto; }
+  .board-card .bc-progress, .board-card .bc-meta, .board-card .bc-actions { display: none; }
+  .board-card::after { content: ""; width: 8px; height: 8px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(-45deg); flex: 0 0 auto; margin-right: 4px; }
+  .board-card.new { min-height: 56px; flex-direction: row; }
+  .board-card.new::after { display: none; }
+  .bc-tile.sm { width: 36px; height: 36px; }
+
+  /* Město: záložky přes celou šířku */
+  .board-tabs { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); padding: 0; gap: 0; }
+  .board-tab { padding: 12px 4px; text-align: center; }
+  .board-tab.active::after { left: 16%; right: 16%; }
+
+  /* Jeden seznam na obrazovku + přepínač */
+  .list-chips:not([hidden]) { display: flex; gap: 8px; padding: 10px 16px 6px; overflow-x: auto; flex: 0 0 auto; scrollbar-width: none; }
+  .list-chips::-webkit-scrollbar { display: none; }
+  .list-chip { flex: 0 0 auto; height: 36px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--text-2); font: inherit; font-size: 14px; font-weight: 500; display: inline-flex; align-items: center; gap: 7px; cursor: pointer; }
+  .list-chip.active { background: var(--text); border-color: var(--text); color: var(--surface); }
+  .list-chip-count { font-family: var(--mono); font-size: 12px; opacity: .7; }
+  .board-view { flex-direction: column; align-items: stretch; padding: 6px 16px 0; gap: 12px; }
+  .lists { flex-direction: column; align-items: stretch; gap: 12px; }
+  .list { width: 100%; flex: 0 0 auto; max-height: none; background: transparent; padding: 0; }
+  .list.m-hidden { display: none; }
+  .board-view:not(.is-virtual) .list-header { display: none; }
+  .board-view.is-virtual .list { background: var(--list-bg); padding: 10px; }
+  .cards { overflow: visible; gap: 10px; }
+  .card-body { padding: 14px; }
+  .card-title-text { font-size: 16px; }
+  .add-card-btn { height: 48px; border: 1.5px dashed var(--border-strong); border-radius: 14px; text-align: center; }
+  .add-list-btn { width: 100%; flex: 0 0 auto; }
+
+  /* Panely zespodu místo vyskakovacích oken */
+  .sheet-backdrop:not([hidden]) { display: block; position: fixed; inset: 0; z-index: 190; background: rgba(24, 24, 27, .45); }
+  .popover.sheet {
+    left: 0 !important; right: 0; top: auto !important; bottom: 0; width: 100%; max-width: none; max-height: 88dvh;
+    border-radius: 22px 22px 0 0; border: 0; padding-bottom: env(safe-area-inset-bottom);
+    box-shadow: 0 -12px 40px rgba(24, 24, 27, .18); animation: sheet-up .2s ease-out;
+  }
+  .popover.sheet::before { content: ""; display: block; width: 40px; height: 5px; border-radius: 999px; background: var(--border-strong); margin: 8px auto 0; }
+  .popover.sheet .popover-header { border-bottom: 0; padding: 8px 16px 4px; font-size: 17px; }
+  .popover.sheet .popover-header span { text-align: left; }
+  .popover.sheet .popover-header button { width: 36px; height: 36px; font-size: 22px; }
+  .popover.sheet .popover-body { padding: 8px 16px 20px; }
+  .popover.sheet .pop-row { min-height: 50px; font-size: 15px; }
+  .popover.sheet .pop-input { height: 46px; font-size: 16px; }
+  .popover.sheet textarea.pop-input { height: auto; }
+  .popover.sheet .pop-btn { height: 50px; font-size: 16px; border-radius: 14px; }
+  @keyframes sheet-up { from { transform: translateY(40px); } to { transform: none; } }
+  .sheet-row { width: 100%; border: 0; background: transparent; font: inherit; color: var(--text); text-align: left; gap: 12px; }
+  .sheet-row-main { flex: 1 1 auto; display: flex; flex-direction: column; gap: 2px; }
+  .sheet-row-main span { font-size: 13px; color: var(--muted); }
+
+  /* Rychlé přidání karty */
+  .quick-add { display: flex; flex-direction: column; gap: 6px; }
+  .qa-label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); margin-top: 6px; }
+  .qa-label .pop-input { margin-bottom: 0; color: var(--text); }
+  .qa-where { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .qa-chips { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 2px; flex-wrap: wrap; }
+  .qa-chip { height: 40px; padding: 0 14px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--text-2); font: inherit; font-size: 14px; font-weight: 500; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+  .qa-chip.person { padding: 0 12px 0 6px; border-radius: 999px; }
+  .qa-chip.on { background: var(--text); border-color: var(--text); color: var(--surface); }
+  .qa-chip.person.on { background: var(--accent-soft); border-color: var(--accent); color: var(--text); }
+  .qa-submit { margin-top: 12px; }
+
+  /* Detail karty a profil přes celou obrazovku */
+  .modal-overlay { padding: 0; }
+  .modal { max-width: none; min-height: 100dvh; border-radius: 0; box-shadow: none; display: flex; flex-direction: column; }
+  .modal-grid { flex: 1 1 auto; }
+  .modal-side { align-content: start; }
+  .modal-close { top: calc(12px + env(safe-area-inset-top)); right: 12px; }
+  .modal-main { padding: calc(18px + env(safe-area-inset-top)) 16px 20px; }
+  .card-title-input { font-size: 22px; }
+  .card-quick-row { gap: 18px; }
+  .section-body { padding-left: 0; }
+  .check-item { min-height: 48px; }
+  .check-item input[type=checkbox] { width: 22px; height: 22px; }
+  .check-item .remove { opacity: 1; }
+  .modal-side { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 16px 16px calc(24px + env(safe-area-inset-bottom)); }
+  .modal-side .side-title, .modal-side .side-title:first-child { grid-column: 1 / -1; margin: 8px 0 0; }
+  .modal-side .side-btn { width: 100%; height: 48px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; }
+  .person-modal { padding: calc(20px + env(safe-area-inset-top)) 16px 28px; }
+  .person-quick { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); gap: 8px; margin: 4px 0 16px; }
+  .pq { height: 64px; border-radius: 14px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text-2); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; text-decoration: none; font-size: 13px; font-weight: 500; }
+  .pq.main { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .drawer { width: 100%; max-width: none; }
+
+  /* Řidiči, výplaty, vozidla */
+  .int-view { padding: 14px 16px 0; }
+  .int-toolbar { gap: 8px; margin-bottom: 14px; }
+  .int-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .month-switch { flex: 1 1 100%; justify-content: space-between; }
+  .pay-stats { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .pay-stats .stat:first-child { grid-column: 1 / -1; }
+  .table-wrap { overflow: visible; }
+  .int-table thead { display: none; }
+  .int-table .pay-row td:not(:first-child):not(:last-child) { display: none; }
+  .int-table .pay-row td { padding: 14px; font-size: 15px; }
+  .int-table .pay-row td:last-child::after { content: ""; display: inline-block; width: 7px; height: 7px; margin-left: 10px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(45deg) translateY(-3px); }
+  .int-table .pay-row.open td:last-child::after { transform: rotate(-135deg); }
+  .int-table td { white-space: normal; }
+  .pay-mobile-lines { display: flex; flex-direction: column; gap: 6px; padding-bottom: 8px; margin-bottom: 4px; border-bottom: 1px solid var(--border); }
+  .pay-mobile-lines > div { display: flex; justify-content: space-between; gap: 12px; }
+  .car-grid { grid-template-columns: 1fr; }
+  .car-actions .pill-btn { height: 44px; }
+  .person-card { min-height: 64px; }
+}

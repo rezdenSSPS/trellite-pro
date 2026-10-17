@@ -37,6 +37,9 @@ const ICONS = {
   logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/>',
   plus: '<path d="M12 5v14"/><path d="M5 12h14"/>',
   bell: '<path d="M6 9a6 6 0 0 1 12 0c0 6 2.5 7.5 2.5 7.5h-17S6 15 6 9z"/><path d="M10 20a2 2 0 0 0 4 0"/>',
+  phone: '<path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.5c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/>',
+  mail: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/>',
+  moon: '<path d="M21 12.5A8.5 8.5 0 1 1 11.5 3 6.5 6.5 0 0 0 21 12.5z"/>',
   key: '<circle cx="8" cy="15" r="4"/><path d="M11 12 20 3"/><path d="M17 6l2 2"/><path d="M15 8l2 2"/>',
   alert: '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
 };
@@ -220,7 +223,33 @@ function renderSidebar() {
   el("navBoards").classList.toggle("active", viewMode === "boards");
   el("navTasks").classList.toggle("active", viewMode === "board" && isMyTasks());
   el("navAdmin").classList.toggle("active", viewMode === "admin");
+  updateMobileNav();
 }
+
+/* ---------- Telefon: spodní lišta, přepínač měst ---------- */
+const phoneMQ = window.matchMedia("(max-width: 760px)");
+const isPhone = () => phoneMQ.matches;
+let lastBoardId = null;
+const mobileList = {}; // boardId -> vybraný seznam na telefonu
+function updateMobileNav() {
+  document.body.dataset.view = viewMode;
+  const cur = viewMode === "boards" ? "mnHome" : viewMode === "admin" ? "mnMe" : isMyTasks() ? "mnTasks" : "mnCities";
+  ["mnHome", "mnTasks", "mnCities", "mnMe"].forEach((id) => { const b = el(id); b.classList.toggle("active", id === cur); if (id === cur) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current"); });
+  const n = me ? me.newTaskCount || 0 : 0; el("mnTaskCount").textContent = n; el("mnTaskCount").hidden = n === 0;
+  const b = viewMode === "board" ? getBoard() : null;
+  el("citySwitch").hidden = !b || !!b.virtual;
+}
+function citySheet(anchor) {
+  const body = document.createElement("div");
+  state.boards.filter((b) => !b.virtual).sort((a, b) => (b.starred ? 1 : 0) - (a.starred ? 1 : 0)).forEach((b) => {
+    const r = document.createElement("button"); r.className = "pop-row sheet-row";
+    const color = hexOf(b.bg.value); const n = boardCards(b).length;
+    r.innerHTML = `<span class="bc-tile sm" style="background:${tint(color, 0.86)};color:${shade(color, 0.25)}">${escapeHtml(initials(b.title).slice(0, 1))}</span><span class="sheet-row-main"><b>${escapeHtml(b.title)}</b><span>${n} ${plural(n, "karta", "karty", "karet")}</span></span>${currentBoardId === b.id ? `<span class="check">✓</span>` : ""}`;
+    r.onclick = () => { closePopover(); openBoard(b.id); }; body.appendChild(r);
+  });
+  popover(anchor, "Města", body);
+}
+phoneMQ.addEventListener("change", () => { closePopover(); if (state && me) { rerender(); updateMobileNav(); } });
 function setHeader({ crumb, title, board }) {
   el("crumb").textContent = crumb;
   el("pageTitle").hidden = !!board; el("pageTitle").textContent = board ? "" : title;
@@ -256,6 +285,8 @@ function openBoard(id) {
   el("addListBtn").hidden = !(isAdmin() && !b.virtual);
   el("newCardBtn").hidden = !!b.virtual;
   boardTab = "ukoly"; loadIntInfo(b);
+  if (!b.virtual) lastBoardId = b.id;
+  el("boardView").classList.toggle("is-virtual", !!b.virtual);
   renderBoard(); renderSidebar();
 }
 
@@ -275,6 +306,12 @@ function renderBoards() {
   el("greetingSub").textContent = tasks.length
     ? `Máš ${tasks.length} ${plural(tasks.length, "přiřazený úkol", "přiřazené úkoly", "přiřazených úkolů")}` + (late ? `, ${late} ${plural(late, "je", "jsou", "je")} po termínu.` : ".")
     : "Nemáš žádné přiřazené úkoly.";
+  const tiles = el("summaryTiles"); tiles.innerHTML = "";
+  [[tasks.length, "Moje úkoly", ""], [late, "Po termínu", late ? "danger" : ""], [state.boards.filter((b) => !b.virtual).length, "Města", ""]].forEach(([n, label, cls], i) => {
+    const t = document.createElement("button"); t.className = "summary-tile " + cls;
+    t.innerHTML = `<span class="summary-num">${n}</span><span>${label}</span>`;
+    t.onclick = i === 2 ? (e) => citySheet(e.currentTarget) : openMyTasks; tiles.appendChild(t);
+  });
   renderPushHint();
   el("tasksSection").hidden = tasks.length === 0;
   el("tasksCount").textContent = tasks.length;
@@ -355,7 +392,24 @@ function renderBoard() {
   if (boardTab !== "ukoly") return renderIntTab();
   renderBoardMembers(b);
   const listsEl = el("lists"); listsEl.innerHTML = "";
-  b.lists.filter((l) => !l.archived).forEach((l) => listsEl.appendChild(renderList(l, b)));
+  const lists = b.lists.filter((l) => !l.archived);
+  const chips = el("listChips"); chips.innerHTML = "";
+  const oneList = isPhone() && !b.virtual && lists.length > 0;
+  chips.hidden = !oneList;
+  if (oneList && !lists.some((l) => l.id === mobileList[b.id])) mobileList[b.id] = lists[0].id;
+  lists.forEach((l) => {
+    const w = renderList(l, b);
+    if (oneList && l.id !== mobileList[b.id]) w.classList.add("m-hidden");
+    listsEl.appendChild(w);
+    if (!oneList) return;
+    const on = l.id === mobileList[b.id];
+    const chip = document.createElement("button"); chip.className = "list-chip" + (on ? " active" : "");
+    chip.setAttribute("role", "tab"); chip.setAttribute("aria-selected", String(on));
+    chip.innerHTML = `<span class="list-dot" style="background:${listDot(l.title)}"></span>${escapeHtml(l.title)}<span class="list-chip-count">${l.cards.filter(cardVisible).length}</span>`;
+    chip.onclick = () => { mobileList[b.id] = l.id; renderBoard(); el("boardView").scrollTop = 0; };
+    chips.appendChild(chip);
+  });
+  if (oneList) { const act = chips.querySelector(".active"); if (act) act.scrollIntoView({ block: "nearest", inline: "center" }); }
 }
 function renderList(list, board) {
   const virtual = board.virtual;
@@ -448,7 +502,7 @@ const num = (n) => new Intl.NumberFormat("cs-CZ", { maximumFractionDigits: 1 }).
 const fmtDate = (v) => v ? new Date(v).toLocaleDateString("cs-CZ", { day: "numeric", month: "numeric", year: "numeric" }) : "";
 const colorFor = (s) => LABEL_COLORS[[...String(s)].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7) % LABEL_COLORS.length];
 
-function hideIntegration() { el("boardTabs").hidden = true; el("intView").hidden = true; closePerson(); }
+function hideIntegration() { el("boardTabs").hidden = true; el("intView").hidden = true; el("listChips").hidden = true; closePerson(); }
 
 async function intGet(path) {
   const r = await fetch("/api/integrace" + path, { credentials: "same-origin" });
@@ -477,7 +531,7 @@ function renderBoardTabs() {
   });
   if (viewMode !== "board") return;
   const onTasks = boardTab === "ukoly"; const b = getBoard();
-  el("boardView").hidden = !onTasks; el("intView").hidden = onTasks;
+  el("boardView").hidden = !onTasks; el("intView").hidden = onTasks; if (!onTasks) el("listChips").hidden = true;
   el("searchWrap").hidden = !onTasks; el("filterBtn").hidden = !onTasks; el("newCardBtn").hidden = !onTasks || !b || !!b.virtual;
   if (!onTasks) el("boardMembers").hidden = true;
 }
@@ -620,6 +674,7 @@ function openPerson(p, links) {
       <span class="avatar xl" style="background:${tint(color, 0.82)};color:${shade(color, 0.45)}">${escapeHtml(initials(p.name))}</span>
       <div><h2 id="personName" class="person-title">${escapeHtml(p.name)}</h2><div class="person-sub">${escapeHtml(personTypeLabel(p))}${p.isActive === false ? " · neaktivní" : ""}</div></div>
     </div>
+    ${p.phone || p.email ? `<div class="person-quick">${p.phone ? `<a class="pq main" href="tel:${escapeHtml(p.phone.replace(/\s+/g, ""))}">${icon("phone", 20)}<span>Zavolat</span></a><a class="pq" href="sms:${escapeHtml(p.phone.replace(/\s+/g, ""))}">${icon("message", 20)}<span>SMS</span></a>` : ""}${p.email ? `<a class="pq" href="mailto:${escapeHtml(p.email)}">${icon("mail", 20)}<span>E-mail</span></a>` : ""}</div>` : ""}
     <div class="person-grid">
       <div>${sec("Kontakt", contact)}${sec("Práce", work)}${sec("Fakturace a platby", billing)}</div>
       <div>${sec("Smlouva", contract)}${sec("Vstupní test", test)}</div>
@@ -663,6 +718,13 @@ function payTable(title, rows, ridic, pronajem) {
     const items = (r.bonusItems || []).map((b) => `<li><span>${escapeHtml(b.reason)}</span>${b.amount == null ? `<span class="muted-sm">bez částky</span>` : money(b.amount, true)}</li>`).join("");
     const shifts = ridic ? `Ranní ${r.morningCount} · Odpolední ${r.afternoonCount} · Celodenní ${r.fulldayCount}` : `${r.shiftCount} ${plural(r.shiftCount, "směna", "směny", "směn")}`;
     detail.innerHTML = `<td colspan="8"><div class="pay-detail-box">
+      <div class="pay-mobile-lines">
+        <div><span>${ridic ? "Směny" : "Hodiny"} × sazba</span><span class="mono">${num(ridic ? r.totalShifts : r.totalHours)} × ${czk(r.rate)}</span></div>
+        <div><span>Vyježděno</span><span class="mono">${czk(r.celkem)}</span></div>
+        ${r.zaloha ? `<div><span>Záloha</span><span class="mono">${money(-r.zaloha)}</span></div>` : ""}
+        ${r.orderBonus ? `<div><span>Bonus za objednávky</span><span class="mono">${money(r.orderBonus, true)}</span></div>` : ""}
+        ${r.manualBonus ? `<div><span>Bonusy a srážky</span><span class="mono">${money(r.manualBonus, true)}</span></div>` : ""}
+      </div>
       <div><span class="pf-label">Směny</span> ${shifts}</div>
       <div><span class="pf-label">Bonusy a srážky</span>${items ? `<ul class="bonus-list">${items}</ul>` : ` <span class="muted-sm">žádné</span>`}</div>
       ${ridic && pronajem ? `<div class="muted-sm">Pronájem vozidla ${czk(pronajem)} je samostatná položka na faktuře – v částce k výplatě není.</div>` : ""}
@@ -867,12 +929,14 @@ function popover(anchor, title, bodyEl) {
   const close = document.createElement("button"); close.textContent = "×"; close.onclick = closePopover; header.appendChild(close);
   const body = document.createElement("div"); body.className = "popover-body"; body.appendChild(bodyEl);
   pop.append(header, body); pop.hidden = false;
+  pop.classList.toggle("sheet", isPhone()); el("sheetBackdrop").hidden = !isPhone();
   const r = anchor.getBoundingClientRect();
   pop.style.top = Math.min(r.bottom + 6, window.innerHeight - pop.offsetHeight - 10) + "px";
   let left = r.left; if (left + pop.offsetWidth > window.innerWidth - 10) left = window.innerWidth - pop.offsetWidth - 10;
   pop.style.left = Math.max(10, left) + "px";
 }
-function closePopover() { el("popover").hidden = true; el("popover").innerHTML = ""; }
+function closePopover() { el("popover").hidden = true; el("popover").innerHTML = ""; el("sheetBackdrop").hidden = true; }
+el("sheetBackdrop").addEventListener("click", closePopover);
 
 /* ============================================================
    Detail karty
@@ -1233,11 +1297,22 @@ el("boardTitle").addEventListener("blur", () => { const b = getBoard(); if (!b |
 el("boardTitle").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); el("boardTitle").blur(); } });
 
 el("sideUser").onclick = (e) => el("userBtn").onclick(e);
+el("mnHome").onclick = () => { closeDrawer(); showBoards(); };
+el("mnTasks").onclick = openMyTasks;
+el("mnCities").onclick = (e) => { if (viewMode !== "board" && lastBoardId && state.boards.some((b) => b.id === lastBoardId)) openBoard(lastBoardId); else citySheet(e.currentTarget); };
+el("mnMe").onclick = (e) => el("userBtn").onclick(e);
+el("mnAdd").onclick = (e) => quickAddSheet(e.currentTarget);
+el("citySwitch").onclick = (e) => citySheet(e.currentTarget);
 el("userBtn").onclick = (e) => {
   const anchorEl = e.currentTarget;
   const body = document.createElement("div");
   const info = document.createElement("div"); info.className = "pop-user"; info.innerHTML = `<b>${escapeHtml(me.name)}</b><br><span style="color:var(--muted);font-size:12px">${escapeHtml(me.username)} · ${me.role === "admin" ? "admin" : "manažer"}</span>`; body.appendChild(info);
   const nt = document.createElement("div"); nt.className = "pop-row"; nt.innerHTML = `${icon("bell", 16)} <span>Upozornění</span>`; nt.onclick = () => notifyPopover(anchorEl); body.appendChild(nt);
+  const th = document.createElement("div"); th.className = "pop-row"; const dark = (state && state.theme) === "dark";
+  th.innerHTML = `${icon("moon", 16)} <span style="flex:1">Tmavý režim</span><span class="mini-switch${dark ? " on" : ""}" aria-hidden="true"></span>`;
+  th.setAttribute("role", "switch"); th.setAttribute("aria-checked", String(dark)); th.tabIndex = 0;
+  th.onclick = () => { el("themeBtn").click(); const d = state.theme === "dark"; th.querySelector(".mini-switch").classList.toggle("on", d); th.setAttribute("aria-checked", String(d)); };
+  body.appendChild(th);
   const pw = document.createElement("div"); pw.className = "pop-row"; pw.innerHTML = `${icon("key", 16)} <span>Změnit heslo</span>`; pw.onclick = () => { closePopover(); changePassword(); }; body.appendChild(pw);
   if (isAdmin()) { const ad = document.createElement("div"); ad.className = "pop-row"; ad.innerHTML = `${icon("users", 16)} <span>Správa uživatelů</span>`; ad.onclick = () => { closePopover(); showAdmin(); }; body.appendChild(ad); }
   const out = document.createElement("div"); out.className = "pop-row"; out.innerHTML = `${icon("logout", 16)} <span>Odhlásit se</span>`; out.onclick = () => { closePopover(); logout(); }; body.appendChild(out);
@@ -1251,6 +1326,61 @@ function changePassword() {
 async function logout() { try { await fetch("/api/logout", { method: "POST", credentials: "same-origin" }); } catch (e) {} if (evtSource) { evtSource.close(); evtSource = null; } me = null; state = null; showLogin(); }
 
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") { if (!el("popover").hidden) return closePopover(); if (!el("personOverlay").hidden) return closePerson(); if (!el("modalOverlay").hidden) return closeModal(); if (!el("drawerOverlay").hidden) return closeDrawer(); } });
+
+/* ============================================================
+   Rychlé přidání karty (tlačítko + na telefonu)
+   ============================================================ */
+function quickAddSheet(anchor) {
+  const boards = state.boards.filter((b) => !b.virtual && b.lists.some((l) => !l.archived));
+  if (!boards.length) return toast("Zatím tu není žádný seznam, kam kartu přidat.");
+  const cur = getBoard();
+  let boardId = cur && !cur.virtual ? cur.id : (lastBoardId && boards.some((b) => b.id === lastBoardId) ? lastBoardId : boards[0].id);
+  let listId = mobileList[boardId] || null;
+  const who = new Set([me.id]); let due = 0;
+  const body = document.createElement("div"); body.className = "quick-add";
+  body.innerHTML = `<label class="qa-label">Co je potřeba udělat<textarea class="pop-input qa-title" rows="2" placeholder="Např. Objednat STK pro 7A2 1180"></textarea></label>
+    <div class="qa-where"><label class="qa-label">Město<select class="pop-input qa-board"></select></label><label class="qa-label">Seznam<select class="pop-input qa-list"></select></label></div>
+    <div class="qa-label">Komu</div><div class="qa-chips qa-who"></div>
+    <div class="qa-label">Termín</div><div class="qa-chips qa-due"></div>`;
+  const bSel = body.querySelector(".qa-board"), lSel = body.querySelector(".qa-list");
+  boards.forEach((b) => bSel.add(new Option(b.title, b.id, false, b.id === boardId)));
+  const fillLists = () => { const b = boards.find((x) => x.id === boardId); lSel.innerHTML = "";
+    const ls = b.lists.filter((l) => !l.archived); if (!ls.some((l) => l.id === listId)) listId = ls[0].id;
+    ls.forEach((l) => lSel.add(new Option(l.title, l.id, false, l.id === listId))); };
+  fillLists();
+  bSel.onchange = () => { boardId = bSel.value; listId = null; fillLists(); };
+  lSel.onchange = () => { listId = lSel.value; };
+  const whoBox = body.querySelector(".qa-who");
+  const drawWho = () => { whoBox.innerHTML = ""; [me, ...state.members.filter((m) => m.id !== me.id)].forEach((m) => {
+    const on = who.has(m.id); const c = document.createElement("button"); c.type = "button"; c.className = "qa-chip person" + (on ? " on" : ""); c.setAttribute("aria-pressed", String(on));
+    c.appendChild(avatarEl(m, "sm")); c.appendChild(document.createTextNode(m.id === me.id ? "Já" : m.name.split(" ")[0]));
+    c.onclick = () => { if (on) who.delete(m.id); else who.add(m.id); drawWho(); }; whoBox.appendChild(c); }); };
+  drawWho();
+  const at = (addDays, toFri) => { const d = new Date(); if (toFri) { const k = (5 - d.getDay() + 7) % 7 || 7; d.setDate(d.getDate() + k); } else d.setDate(d.getDate() + addDays); d.setHours(17, 0, 0, 0); return d.getTime(); };
+  const dues = [["Bez termínu", null], ["Dnes", () => at(0)], ["Zítra", () => at(1)], ["Pátek", () => at(0, true)]];
+  const dueBox = body.querySelector(".qa-due");
+  const drawDue = () => { dueBox.innerHTML = ""; dues.forEach(([label], i) => { const c = document.createElement("button"); c.type = "button"; c.className = "qa-chip" + (i === due ? " on" : ""); c.setAttribute("aria-pressed", String(i === due)); c.textContent = label; c.onclick = () => { due = i; drawDue(); }; dueBox.appendChild(c); }); };
+  drawDue();
+  const btn = document.createElement("button"); btn.className = "pop-btn qa-submit"; btn.textContent = "Přidat kartu";
+  btn.onclick = async () => {
+    const title = body.querySelector(".qa-title").value.trim(); if (!title) { body.querySelector(".qa-title").focus(); return toast("Napiš, co je potřeba udělat."); }
+    btn.disabled = true;
+    try {
+      const before = new Set(((state.boards.find((b) => b.id === boardId) || {}).lists || []).flatMap((l) => l.cards.map((c) => c.id)));
+      let j = await api("POST", "/lists/" + listId + "/cards", { title });
+      const nb = j.state.boards.find((b) => b.id === boardId); const nl = nb && nb.lists.find((l) => l.id === listId);
+      const card = nl && nl.cards.slice().reverse().find((c) => !before.has(c.id));
+      const memberIds = [...who]; const dueVal = dues[due][1] ? { date: dues[due][1](), done: false } : null;
+      if (card && (memberIds.length || dueVal)) j = await api("PUT", "/cards/" + card.id, { memberIds, due: dueVal });
+      applyPayload(j); closePopover();
+      mobileList[boardId] = listId;
+      toast(`Karta přidána · ${nb ? nb.title : ""} · ${nl ? nl.title : ""}`);
+    } catch (e) { btn.disabled = false; }
+  };
+  body.appendChild(btn);
+  popover(anchor, "Nová karta", body);
+  setTimeout(() => body.querySelector(".qa-title").focus(), 50);
+}
 
 /* ============================================================
    Push upozornění
