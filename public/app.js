@@ -131,6 +131,7 @@ function connectSSE() {
       if (d.originator && d.originator === CLIENT_ID) return;
       // změna u aut ve šichtovnici (mechanik si vzal závadu, poznámka, servis…)
       if (d.kind === "vozidla") { refreshFleet(); return; }
+      if (d.kind === "lide") { refreshPeople(); return; }
       clearTimeout(refetchTimer); refetchTimer = setTimeout(refetchState, 180);
     };
     evtSource.onerror = () => { setSync("offline", "Spojení přerušeno – obnovuji…"); };
@@ -594,7 +595,9 @@ function monthSwitcher() {
 function intBanner(box, kind, text) { const d = document.createElement("div"); d.className = "int-banner " + kind; d.textContent = text; box.appendChild(d); }
 
 /* ---------- Lidé ---------- */
+const isPending = (p) => !!(p.contract && p.contract.status !== "signed");
 function personTypeLabel(p) {
+  if (p.onlyContract && isPending(p)) return "Čeká na podpis smluv";
   if (p.onlyContract) return "Jen smlouva · není ve šichtovnici";
   if (p.isRidic) return "Řidič OSVČ";
   return p.level || "Kurýr";
@@ -602,6 +605,10 @@ function personTypeLabel(p) {
 // Řidiči OSVČ vlevo, brigádníci (DPP/DPČ) vpravo
 const isDriverCol = (p) => p.isRidic || (p.contract && p.contract.type === "osvc");
 function renderPeople(box, data) {
+  const add = document.createElement("div"); add.className = "people-actions";
+  add.innerHTML = `<button class="primary-btn">${icon("plus", 16)}<span>Nový kurýr</span></button>`;
+  add.querySelector("button").onclick = () => openNewCourier(intInfo && intInfo.city);
+  box.appendChild(add);
   if (data.errors.smenovnik) intBanner(box, "danger", "Šichtovnice: " + data.errors.smenovnik);
   if (data.errors.podpisy) intBanner(box, "warn", "Smlouvy a testy teď nejdou načíst – " + data.errors.podpisy);
   if (!data.people.length) { box.insertAdjacentHTML("beforeend", `<div class="int-empty">V tomhle městě zatím nikdo není.</div>`); return; }
@@ -622,7 +629,9 @@ function personCardEl(p, links) {
   const card = document.createElement("button"); card.className = "person-card" + (p.isActive === false ? " inactive" : "");
   const color = colorFor(p.name);
   const chips = [];
+  if (isPending(p)) chips.push(`<span class="chip warn">Čeká na podpis</span>`);
   if (p.contract) chips.push(`<span class="chip">${escapeHtml(CONTRACT_LABEL[p.contract.type] || "Smlouva")}</span>`);
+  if (p.clothing && !isPending(p)) chips.push(p.clothing.signedAt ? `<span class="chip ok">Oblečení převzato</span>` : `<span class="chip warn">Oblečení nepřevzato</span>`);
   if (p.test) chips.push(`<span class="chip ${testClass(p.test.percent)}">Test ${p.test.percent} %${p.test.percent < TEST_PASS ? " · Neprošel" : ""}</span>`);
   if (p.clothingSize) chips.push(`<span class="chip">Vel. ${escapeHtml(p.clothingSize)}</span>`);
   if (p.isActive === false) chips.push(`<span class="chip muted">Neaktivní</span>`);
@@ -653,7 +662,11 @@ function openPerson(p, links) {
     contract = field("Smlouva", escapeHtml(CONTRACT_LABEL[p.contract.type] || "—"))
       + field("Stav", p.contract.status === "signed" ? "Podepsáno" + (p.contract.signedAt ? " " + escapeHtml(fmtDate(p.contract.signedAt)) : "") : "Čeká na podpis")
       + (p.contract.hasPdf ? `<a class="primary-btn person-pdf" href="/api/integrace/smlouva/${encodeURIComponent(p.contract.id)}" target="_blank" rel="noopener">${icon("download", 16)}<span>Stáhnout smlouvu (PDF)</span></a>` : "");
+    if (p.contract.link) contract += `<div class="nc-link"><span class="pf-label">Odkaz pro kurýra</span><input class="pop-input mono" readonly value="${escapeHtml(p.contract.link)}"><div class="nc-link-actions"><button type="button" class="pill-btn" data-copy="${escapeHtml(p.contract.link)}">Kopírovat odkaz</button></div></div>`;
   } else contract = `<p class="empty-note">Ke smlouvě se nepodařilo dohledat záznam v podpisech.</p>`;
+  const clothing = p.clothing ? field("Dostane", escapeHtml(p.clothing.items.map((i) => `${i.count}× ${i.label}`).join(", ")))
+    + field("Velikost", escapeHtml(p.clothing.size || "—"))
+    + field("Převzetí", p.clothing.signedAt ? "Potvrzeno podpisem " + escapeHtml(fmtDate(p.clothing.signedAt)) : (isPending(p) ? "Až po podpisu smluv" : "Kurýr ještě nepotvrdil")) : "";
 
   let test = "";
   if (p.test) {
@@ -677,10 +690,138 @@ function openPerson(p, links) {
     ${p.phone || p.email ? `<div class="person-quick">${p.phone ? `<a class="pq main" href="tel:${escapeHtml(p.phone.replace(/\s+/g, ""))}">${icon("phone", 20)}<span>Zavolat</span></a><a class="pq" href="sms:${escapeHtml(p.phone.replace(/\s+/g, ""))}">${icon("message", 20)}<span>SMS</span></a>` : ""}${p.email ? `<a class="pq" href="mailto:${escapeHtml(p.email)}">${icon("mail", 20)}<span>E-mail</span></a>` : ""}</div>` : ""}
     <div class="person-grid">
       <div>${sec("Kontakt", contact)}${sec("Práce", work)}${sec("Fakturace a platby", billing)}</div>
-      <div>${sec("Smlouva", contract)}${sec("Vstupní test", test)}</div>
+      <div>${sec("Smlouva", contract)}${sec("Pracovní oblečení", clothing)}${sec("Vstupní test", test)}</div>
     </div>
     ${linkBtns.length ? `<div class="person-links">${linkBtns.join("")}</div>` : ""}`;
+  bindCopyButtons(body);
   el("personOverlay").hidden = false;
+}
+function refreshPeople() {
+  Object.keys(intData).forEach((k) => { if (k.endsWith(":lide")) delete intData[k]; });
+  if (viewMode === "board" && boardTab === "lide") renderIntTab();
+}
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); toast("Odkaz zkopírován."); }
+  catch (e) { toast("Zkopírujte odkaz ručně."); }
+}
+function bindCopyButtons(root) { root.querySelectorAll("[data-copy]").forEach((b) => b.onclick = () => copyText(b.dataset.copy)); }
+
+/* ---------- Nový kurýr: odkaz do podpisů z Trella ----------
+   Formulář je stejný jako v administraci podpisů (definici posílají podpisy),
+   navíc počty kusů oblečení. Kurýr pak odkaz vyplní, podepíše smlouvy a až
+   oblečení dostane, potvrdí převzetí podpisem dohody. */
+async function openNewCourier(cityPreset) {
+  const body = el("personBody");
+  body.innerHTML = `<div class="int-empty">Načítám formulář…</div>`; el("personOverlay").hidden = false;
+  let form;
+  try { form = await intGet("/nastup/formular"); }
+  catch (e) { if (!e.unauth) body.innerHTML = `<div class="int-banner danger">${escapeHtml(e.message)}</div>`; return; }
+  if (!form.cities.length) { body.innerHTML = `<div class="int-banner danger">Nemáte žádné město, kam byste mohl přidat kurýra.</div>`; return; }
+
+  const st = {
+    contractType: form.contractTypes[0].id,
+    cities: new Set(form.cities.some((c) => c.id === cityPreset) ? [cityPreset] : form.cities.length === 1 ? [form.cities[0].id] : []),
+    docs: new Set(form.extraDocs.filter((d) => d.default).map((d) => d.id)),
+    withTest: true, withPhotos: true, skipSmenovnik: false,
+    clothing: { ...(form.clothing.defaults[form.contractTypes[0].id] || {}) }, clothingTouched: false,
+    employer: Object.fromEntries(form.employerFields.map((f) => [f.id, f.default || ""])),
+  };
+  const contractDocs = () => (form.contractTypes.find((c) => c.id === st.contractType) || {}).docs || [];
+  const activeDocs = () => [...contractDocs(), ...form.extraDocs.filter((d) => st.docs.has(d.id) && !d.skipFor.includes(st.contractType)).map((d) => d.id)];
+  const chip = (on, label, attrs) => `<button type="button" class="nc-chip${on ? " on" : ""}" aria-pressed="${on}" ${attrs}>${escapeHtml(label)}</button>`;
+
+  const draw = () => {
+    const docs = new Set(activeDocs());
+    const empFields = form.employerFields.filter((f) => (f.docIds || []).some((id) => docs.has(id)));
+    body.innerHTML = `<div class="person-head nc-head"><span class="avatar xl nc-ico">${icon("user", 26)}</span>
+        <div><h2 id="personName" class="person-title">Nový kurýr</h2><div class="person-sub">Vytvoří odkaz do podpisů, který kurýrovi pošleš.</div></div></div>
+      <form class="nc-form" novalidate>
+        <section class="nc-sec"><h3>Kurýr</h3>
+          <div class="nc-grid">
+            <label class="nc-field">Jméno a příjmení *<input class="pop-input" name="employee_name" autocomplete="off" required></label>
+            <label class="nc-field">Telefon<input class="pop-input" name="employee_phone" type="tel" autocomplete="off"></label>
+            <label class="nc-field">E-mail<input class="pop-input" name="employee_email" type="email" autocomplete="off"></label>
+          </div>
+          <p class="muted-sm">Co tu vyplníš, kurýr už jen uvidí. Zbytek doplní sám v odkazu.</p></section>
+        <section class="nc-sec"><h3>Město (šichtovnice) *</h3><div class="nc-chips">${form.cities.map((c) => chip(st.cities.has(c.id), c.label, `data-city="${c.id}"`)).join("")}</div></section>
+        <section class="nc-sec"><h3>Typ spolupráce *</h3><div class="nc-chips">${form.contractTypes.map((c) => chip(st.contractType === c.id, c.label, `data-contract="${c.id}"`)).join("")}</div></section>
+        <section class="nc-sec"><h3>Pracovní oblečení</h3>
+          <div class="nc-clothing">${form.clothing.items.map((i) => `<label class="nc-qty"><span>${escapeHtml(i.label)}</span>
+            <span class="nc-stepper"><button type="button" data-step="${i.id}" data-d="-1" aria-label="Méně">−</button><input type="number" min="0" max="20" name="obl_${i.id}" value="${st.clothing[i.id] || 0}"><button type="button" data-step="${i.id}" data-d="1" aria-label="Více">+</button></span></label>`).join("")}</div>
+          <p class="muted-sm">Předvyplněno podle typu spolupráce. Velikost vyplní kurýr, převzetí potvrdí podpisem až při předání.</p></section>
+        <section class="nc-sec"><h3>Kroky v odkazu</h3>
+          <label class="nc-check"><input type="checkbox" data-flag="withTest" ${st.withTest ? "checked" : ""}> Vstupní test před podpisem</label>
+          <label class="nc-check"><input type="checkbox" data-flag="withPhotos" ${st.withPhotos ? "checked" : ""}> Na závěr fotky dokladů (OP, ŘP, kartička pojišťovny)</label>
+          <div class="nc-sub">Doplňkové dokumenty</div>
+          ${form.extraDocs.filter((d) => !d.skipFor.includes(st.contractType)).map((d) => `<label class="nc-check"><input type="checkbox" data-doc="${d.id}" ${st.docs.has(d.id) ? "checked" : ""}> ${escapeHtml(d.name)}</label>`).join("")}
+        </section>
+        <details class="nc-sec nc-details"><summary>Údaje za zaměstnavatele <span class="muted-sm">(předvyplněno, zkontroluj)</span></summary>
+          <div class="nc-grid">${empFields.map((f) => `<label class="nc-field">${escapeHtml(f.label)}${f.required ? " *" : ""}${f.type === "choice"
+            ? `<select class="pop-input" data-emp="${f.id}">${(f.options || []).map((o) => `<option ${o === st.employer[f.id] ? "selected" : ""}>${escapeHtml(o)}</option>`).join("")}</select>`
+            : `<input class="pop-input" data-emp="${f.id}" type="${f.type === "date" ? "date" : "text"}" value="${escapeHtml(st.employer[f.id] || "")}">`}</label>`).join("")}</div>
+          <label class="nc-check"><input type="checkbox" data-flag="skipSmenovnik" ${st.skipSmenovnik ? "checked" : ""}> Nevytvářet údaje ve šichtovnici a Foodisu</label>
+        </details>
+        <div class="nc-submit"><button type="submit" class="primary-btn">${icon("plus", 16)}<span>Vytvořit odkaz</span></button></div>
+      </form>`;
+    const f = body.querySelector("form");
+    ["employee_name", "employee_phone", "employee_email"].forEach((n) => { if (st[n]) f.elements[n].value = st[n]; f.elements[n].oninput = (e) => { st[n] = e.target.value; }; });
+    f.querySelectorAll("[data-city]").forEach((b) => b.onclick = () => { const c = b.dataset.city; st.cities.has(c) ? st.cities.delete(c) : st.cities.add(c); draw(); });
+    f.querySelectorAll("[data-contract]").forEach((b) => b.onclick = () => {
+      st.contractType = b.dataset.contract;
+      if (!st.clothingTouched) st.clothing = { ...(form.clothing.defaults[st.contractType] || {}) };
+      draw();
+    });
+    f.querySelectorAll("[data-step]").forEach((b) => b.onclick = () => {
+      const id = b.dataset.step; st.clothing[id] = Math.max(0, Math.min(20, (Number(st.clothing[id]) || 0) + Number(b.dataset.d))); st.clothingTouched = true; draw();
+    });
+    f.querySelectorAll(".nc-qty input").forEach((i) => i.onchange = () => { st.clothing[i.name.slice(4)] = Math.max(0, Math.min(20, parseInt(i.value, 10) || 0)); st.clothingTouched = true; draw(); });
+    f.querySelectorAll("[data-flag]").forEach((c) => c.onchange = () => { st[c.dataset.flag] = c.checked; });
+    f.querySelectorAll("[data-doc]").forEach((c) => c.onchange = () => { c.checked ? st.docs.add(c.dataset.doc) : st.docs.delete(c.dataset.doc); draw(); });
+    f.querySelectorAll("[data-emp]").forEach((i) => i.onchange = () => { st.employer[i.dataset.emp] = i.value; });
+    f.onsubmit = async (e) => {
+      e.preventDefault();
+      const name = (st.employee_name || "").trim();
+      if (!name) { f.elements.employee_name.focus(); return toast("Vyplň jméno kurýra."); }
+      if (!st.cities.size) return toast("Vyber město.");
+      const missing = empFields.filter((x) => x.required && !String(st.employer[x.id] || "").trim());
+      if (missing.length) { f.querySelector(".nc-details").open = true; return toast("Vyplň: " + missing.map((x) => x.label).join(", ")); }
+      const values = { employee_name: name };
+      if ((st.employee_phone || "").trim()) values.employee_phone = st.employee_phone.trim();
+      if ((st.employee_email || "").trim()) values.employee_email = st.employee_email.trim();
+      empFields.forEach((x) => { if (String(st.employer[x.id] || "").trim()) values[x.id] = st.employer[x.id]; });
+      const btn = f.querySelector(".nc-submit button"); btn.disabled = true;
+      try {
+        const j = await intSend("POST", "/nastup", {
+          title: name, contractType: st.contractType, docs: form.extraDocs.filter((d) => st.docs.has(d.id) && !d.skipFor.includes(st.contractType)).map((d) => d.id),
+          cities: [...st.cities], values, withTest: st.withTest, withPhotos: st.withPhotos, skipSmenovnik: st.skipSmenovnik, clothing: st.clothing,
+        });
+        showCourierLink(j.zaznam, st.employee_phone);
+        refreshPeople();
+      } catch (err) { btn.disabled = false; if (!err.unauth) toast(err.message); }
+    };
+  };
+  draw();
+  setTimeout(() => { const n = body.querySelector("[name=employee_name]"); if (n) n.focus(); }, 50);
+}
+function showCourierLink(rec, phone) {
+  const body = el("personBody"); const link = rec.link || "";
+  const items = rec.clothing ? rec.clothing.items.map((i) => `${i.count}× ${i.label}`).join(", ") : "";
+  const sms = phone ? `sms:${phone.replace(/\s+/g, "")}?&body=${encodeURIComponent("Ahoj, tady je odkaz k nástupu – smlouvy a test vyplníš v mobilu: " + link)}` : "";
+  body.innerHTML = `<div class="person-head nc-head"><span class="avatar xl nc-ico ok">${icon("check", 26)}</span>
+      <div><h2 id="personName" class="person-title">Odkaz je připravený</h2><div class="person-sub">${escapeHtml(rec.name)} · ${escapeHtml(CONTRACT_LABEL[rec.contractType] || "")}${items ? " · " + escapeHtml(items) : ""}</div></div></div>
+    <div class="nc-link big"><input class="pop-input mono" readonly value="${escapeHtml(link)}">
+      <div class="nc-link-actions"><button type="button" class="primary-btn" data-copy="${escapeHtml(link)}">Kopírovat odkaz</button>
+        ${navigator.share ? `<button type="button" class="pill-btn nc-share">Sdílet…</button>` : ""}
+        ${sms ? `<a class="pill-btn" href="${escapeHtml(sms)}">Poslat SMS</a>` : ""}</div></div>
+    <ol class="nc-steps"><li>Pošli odkaz kurýrovi (SMS, WhatsApp, e-mail).</li>
+      <li>Kurýr udělá test, podepíše smlouvy a nahraje doklady – v Trellu ho hned vidíš v Řidičích jako „Čeká na podpis“.</li>
+      <li>Po podpisu se mu samy vytvoří údaje ve šichtovnici a Foodisu.</li>
+      ${items ? `<li>Až dostane oblečení, potvrdí převzetí v tom samém odkazu (tlačítko na konci).</li>` : ""}</ol>
+    <div class="nc-submit"><button type="button" class="pill-btn nc-done">Hotovo</button></div>`;
+  bindCopyButtons(body);
+  const share = body.querySelector(".nc-share"); if (share) share.onclick = () => navigator.share({ title: "Nástup – " + rec.name, url: link }).catch(() => {});
+  body.querySelector(".nc-done").onclick = closePerson;
+  const input = body.querySelector(".nc-link input"); input.onclick = () => input.select();
 }
 el("personClose").onclick = closePerson;
 el("personOverlay").addEventListener("click", (e) => { if (e.target === el("personOverlay")) closePerson(); });
@@ -1301,7 +1442,14 @@ el("mnHome").onclick = () => { closeDrawer(); showBoards(); };
 el("mnTasks").onclick = openMyTasks;
 el("mnCities").onclick = (e) => { if (viewMode !== "board" && lastBoardId && state.boards.some((b) => b.id === lastBoardId)) openBoard(lastBoardId); else citySheet(e.currentTarget); };
 el("mnMe").onclick = (e) => el("userBtn").onclick(e);
-el("mnAdd").onclick = (e) => quickAddSheet(e.currentTarget);
+el("mnAdd").onclick = (e) => {
+  const anchor = e.currentTarget; const body = document.createElement("div"); body.className = "add-chooser";
+  [["check", "Úkol", "Karta do seznamu, komu a do kdy", () => quickAddSheet(anchor)],
+   ["user", "Nový kurýr", "Odkaz na smlouvy, test a oblečení", () => openNewCourier(viewMode === "board" && intInfo ? intInfo.city : null)]]
+    .forEach(([ic, title, sub, fn]) => { const b = document.createElement("button"); b.className = "add-choice";
+      b.innerHTML = `${icon(ic, 20)}<span><b>${title}</b><small>${sub}</small></span>`; b.onclick = () => { closePopover(); fn(); }; body.appendChild(b); });
+  popover(anchor, "Přidat", body);
+};
 el("citySwitch").onclick = (e) => citySheet(e.currentTarget);
 el("userBtn").onclick = (e) => {
   const anchorEl = e.currentTarget;

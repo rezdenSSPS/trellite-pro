@@ -976,3 +976,46 @@ textarea.pop-input { height: auto; min-height: 96px; padding: 10px 12px; line-he
   .car-actions .pill-btn { height: 44px; }
   .person-card { min-height: 64px; }
 }
+
+/* Nový kurýr: formulář (odkaz do podpisů) + výběr na „+“ */
+.people-actions { display: flex; justify-content: flex-end; margin: -8px 0 16px; }
+.nc-head .nc-ico { background: var(--accent-soft); color: var(--accent); }
+.nc-head .nc-ico.ok { background: var(--ok-soft); color: var(--ok); }
+.nc-form { display: flex; flex-direction: column; gap: 4px; }
+.nc-sec { padding: 14px 0; border-top: 1px solid var(--border); }
+.nc-sec h3 { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 10px; }
+.nc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px 14px; }
+.nc-field { display: flex; flex-direction: column; gap: 5px; font-size: 13px; color: var(--text-2); }
+.nc-field .pop-input { margin-bottom: 0; color: var(--text); }
+.nc-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.nc-chip { min-height: 38px; padding: 6px 14px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--text-2); font: inherit; font-size: 14px; font-weight: 500; cursor: pointer; text-align: left; }
+.nc-chip:hover { border-color: var(--accent); }
+.nc-chip.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-soft-ink); font-weight: 600; }
+.nc-clothing { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.nc-qty { display: flex; flex-direction: column; gap: 6px; font-size: 14px; font-weight: 500; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-2); }
+.nc-stepper { display: flex; align-items: center; gap: 6px; }
+.nc-stepper button { width: 34px; height: 34px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--subtle); font-size: 18px; line-height: 1; cursor: pointer; color: var(--text); }
+.nc-stepper input { width: 52px; height: 34px; text-align: center; border: 1px solid var(--border); border-radius: 8px; font: inherit; font-weight: 600; background: var(--field); color: var(--text); }
+.nc-check { display: flex; align-items: center; gap: 10px; min-height: 34px; font-size: 14px; cursor: pointer; }
+.nc-check input { width: 17px; height: 17px; accent-color: var(--accent); margin: 0; flex: 0 0 auto; }
+.nc-sub { font-size: 13px; color: var(--muted); margin: 10px 0 2px; }
+.nc-details summary { cursor: pointer; font-size: 14px; font-weight: 600; padding: 2px 0 10px; }
+.nc-details[open] summary { margin-bottom: 4px; }
+.nc-submit { display: flex; justify-content: flex-end; gap: 8px; padding-top: 14px; border-top: 1px solid var(--border); }
+.nc-link { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.nc-link .pop-input { margin-bottom: 0; font-size: 13px; }
+.nc-link.big { margin: 4px 0 18px; }
+.nc-link.big .pop-input { height: 46px; font-size: 14px; }
+.nc-link-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.nc-steps { margin: 0 0 8px; padding-left: 20px; font-size: 14px; color: var(--text-2); line-height: 1.6; }
+.add-chooser { display: flex; flex-direction: column; gap: 6px; }
+.add-choice { display: flex; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-2); color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.add-choice:hover { border-color: var(--accent); background: var(--accent-soft); }
+.add-choice .icon { color: var(--accent); }
+.add-choice span { display: flex; flex-direction: column; gap: 2px; }
+.add-choice small { color: var(--muted); font-size: 12px; }
+@media (max-width: 640px) {
+  .nc-grid { grid-template-columns: 1fr; }
+  .nc-submit .primary-btn { width: 100%; justify-content: center; height: 46px; }
+  .people-actions .primary-btn { width: 100%; justify-content: center; }
+}

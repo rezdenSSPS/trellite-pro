@@ -609,7 +609,7 @@ async function upstreamWrite(service, method, path, body) {
     });
     let j = null; try { j = await r.json(); } catch (e) {}
     if (!r.ok) { const err = new Error((j && j.error) || `HTTP ${r.status}`); err.status = r.status; throw err; }
-    for (const k of intCache.keys()) if (k.startsWith(service + "/vozidla")) intCache.delete(k);
+    for (const k of intCache.keys()) if (k.startsWith(service + "/")) intCache.delete(k);
     return j;
   } finally { clearTimeout(timer); }
 }
@@ -685,7 +685,8 @@ app.get("/api/integrace/board/:boardId/lide", requireAuth, async (req, res) => {
     const signed = p.records.filter((r) => r.status === "signed");
     const contract = signed.find((r) => r.hasPdf) || signed[0] || p.records[0] || null;
     const withTest = p.records.find((r) => r.test);
-    p.contract = contract ? { id: contract.id, type: contract.contractType, signedAt: contract.signedAt, status: contract.status, hasPdf: contract.hasPdf } : null;
+    p.contract = contract ? { id: contract.id, type: contract.contractType, signedAt: contract.signedAt, status: contract.status, hasPdf: contract.hasPdf, link: contract.status === "signed" ? null : contract.link } : null;
+    p.clothing = (p.records.find((r) => r.clothing) || {}).clothing || null;
     p.test = withTest ? withTest.test : null;
     p.clothingSize = (p.records.find((r) => r.clothingSize) || {}).clothingSize || "";
     p.email = (p.records.find((r) => r.email) || {}).email || "";
@@ -698,6 +699,40 @@ app.get("/api/integrace/board/:boardId/lide", requireAuth, async (req, res) => {
     people, links: intLinks(),
     errors: { smenovnik: kur.status === "rejected" ? upstreamError(kur.reason) : null, podpisy: sml.status === "rejected" ? upstreamError(sml.reason) : null },
   });
+});
+
+/* Nový kurýr z Trella: formulář je definovaný v podpisech (typ spolupráce,
+   dokumenty, údaje zaměstnavatele, oblečení), Trello ho jen vykreslí a odešle.
+   Zakládat smí admin a kdo vidí záložku Řidiči; manažer jen pro svá města. */
+function courierCities(u) {
+  const out = new Set();
+  DOC.boards.forEach((b) => { if (!b.archived && canSeeBoard(u, b) && tabAllowed(u, b, "Zaměstnanci") && tabVisible(u, b, "lide")) out.add(slug(b.title)); });
+  return out;
+}
+app.get("/api/integrace/nastup/formular", requireAuth, async (req, res) => {
+  const mine = courierCities(req.user);
+  if (!isAdmin(req.user) && !mine.size) return res.status(403).json({ error: "forbidden" });
+  try {
+    const form = await upstream("podpisy", "/nastup/formular", { ttl: 5 * 60e3 });
+    res.json({ ...form, cities: form.cities.filter((c) => isAdmin(req.user) || mine.has(c.id)) });
+  } catch (e) { res.status(502).json({ error: "upstream", message: upstreamError(e) }); }
+});
+app.post("/api/integrace/nastup", requireAuth, async (req, res) => {
+  const mine = courierCities(req.user);
+  if (!isAdmin(req.user) && !mine.size) return res.status(403).json({ error: "forbidden" });
+  const b = req.body || {};
+  const cities = [].concat(b.cities || []).map(String);
+  if (!isAdmin(req.user) && cities.some((c) => !mine.has(c))) return res.status(403).json({ error: "forbidden", message: "Do tohoto města kurýra přidat nemůžete." });
+  if (!String(b.title || "").trim()) return res.status(400).json({ error: "empty", message: "Vyplňte jméno kurýra." });
+  try {
+    const rec = await upstreamWrite("podpisy", "POST", "/nastup", {
+      contractType: b.contractType, docs: b.docs, values: b.values, cities, title: b.title,
+      withPhotos: !!b.withPhotos, withTest: !!b.withTest, skipSmenovnik: !!b.skipSmenovnik, clothing: b.clothing,
+      createdBy: req.user.name,
+    });
+    broadcast(req.header("x-client-id"), "lide");
+    res.status(201).json({ zaznam: rec });
+  } catch (e) { writeError(res, e); }
 });
 
 app.get("/api/integrace/board/:boardId/vyplaty", requireAuth, async (req, res) => {
