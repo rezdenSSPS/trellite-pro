@@ -838,6 +838,7 @@ async function monPositions() {
       driverName: (lp && lp.driverName) || c.lastKnownDriver || "",
       speed: lp ? lp.speed : 0,
       isKeyOn: lp ? !!lp.isKeyOn : false,
+      responding: c.isResponding !== false, // jednotka hlášená jako funkční (i když auto stojí)
     });
   }));
   monPosCache = { exp: Date.now() + 20e3, byKey };
@@ -882,7 +883,7 @@ app.get("/api/integrace/board/:boardId/gps", requireAuth, async (req, res) => {
         spz: v.spz, lat: p.latitude, lon: p.longitude, speed: Math.max(0, Math.round(p.speed || 0)),
         keyOn: !!p.isKeyOn, moving: !!p.isKeyOn && (p.speed || 0) > 3,
         at: p.lastKnownDate, direction: p.direction, driver: (p.driverName || "").trim(),
-        address: addrs.get(p.carId) || "",
+        responding: p.responding !== false, address: addrs.get(p.carId) || "",
       };
     });
     res.json({ enabled: true, positions, at: Date.now() });

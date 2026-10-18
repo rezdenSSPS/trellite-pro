@@ -956,11 +956,15 @@ function loadLeaflet() {
 function gpsState(p) {
   if (!p) return null;
   const t = new Date(p.at).getTime();
-  const stale = !t || Date.now() - t > 36e5; // starší než hodina → bez čerstvého signálu
-  if (stale) return { cls: "off", label: "Bez čerstvého signálu", big: "—", t, stale };
+  const ageH = t ? (Date.now() - t) / 36e5 : Infinity;
+  // „Bez signálu" jen když jednotka hlásí poruchu, nebo je úplně bez údaje či
+  // přes 3 dny ticho. Běžně zaparkované auto přestane streamovat a poloha
+  // (místo parkování) zůstává platná – to není ztráta signálu.
+  const stale = !t || p.responding === false || ageH > 72;
+  if (stale) return { cls: "off", label: "Bez signálu", big: "—", t, stale };
   if (p.moving) return { cls: "go", label: "Jede", big: `${num(p.speed)} km/h`, t };
   if (p.keyOn) return { cls: "idle", label: "Motor běží, stojí", big: "0 km/h", t };
-  return { cls: "park", label: "Zaparkováno", big: "Parkuje", t };
+  return { cls: "park", label: "Zaparkováno", big: "Stojí", t };
 }
 const COMPASS = ["sever", "severovýchod", "východ", "jihovýchod", "jih", "jihozápad", "západ", "severozápad"];
 const compass = (deg) => COMPASS[Math.round(((Number(deg) % 360) + 360) % 360 / 45) % 8];
@@ -1061,7 +1065,7 @@ function renderCarLive() {
       <div><dt>Poslední poloha</dt><dd>${st.t ? escapeHtml(relTime(st.t)) : "—"}</dd></div>
       <div><dt>Souřadnice</dt><dd class="mono">${Number(pos.lat).toFixed(4)}, ${Number(pos.lon).toFixed(4)}</dd></div>
     </dl>
-    ${st.stale ? `<div class="cd-live-msg">Jednotka v autě se přes hodinu neozvala – auto může stát v garáži bez signálu.</div>` : ""}
+    ${st.stale ? `<div class="cd-live-msg">Jednotka se delší dobu neozvala – ukazujeme poslední známou polohu (auto může stát bez signálu, např. v garáži).</div>` : ""}
     <div class="cd-live-actions">
       <a class="primary-btn cd-nav" href="${links.route}" target="_blank" rel="noopener">${icon("navigation", 16)}<span>Navigovat</span></a>
       ${phone ? `<a class="pill-btn" href="tel:${escapeHtml(phone.replace(/\s+/g, ""))}">${icon("phone", 16)}<span>Zavolat řidiči</span></a>` : ""}
