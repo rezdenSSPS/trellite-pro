@@ -811,13 +811,35 @@ const spzKey = (s) => String(s || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 let monPosCache = null; // { exp, byKey }
 async function monPositions() {
   if (monPosCache && monPosCache.exp > Date.now()) return monPosCache.byKey;
-  const data = await monFetch("/api/Car/CarsPositionsByUserID/0");
-  const byKey = new Map();
-  ((data && data.lastPositions) || []).forEach((p) => {
-    const k = spzKey(p.carSPZ); if (!k) return;
-    const prev = byKey.get(k); // vrací i víc bodů na auto – nech ten nejnovější
-    if (!prev || String(p.lastKnownDate) > String(prev.lastKnownDate)) byKey.set(k, p);
+  // Poslední známá poloha VŠECH aut je v GroupHierarchy. CarsPositionsByUserID
+  // je naproti tomu jen živý stream právě jedoucích/aktivních vozů (parkující
+  // auta v něm nejsou), takže ho jen přimícháme navrch kvůli rychlosti a
+  // zapnutému motoru. Párujeme přes stabilní carId.
+  const [tree, live] = await Promise.all([
+    monFetch("/api/Car/GroupHierarchy"),
+    monFetch("/api/Car/CarsPositionsByUserID/0").catch(() => null),
+  ]);
+  const liveById = new Map();
+  ((live && live.lastPositions) || []).forEach((p) => {
+    const prev = liveById.get(p.carId);
+    if (!prev || String(p.lastKnownDate) > String(prev.lastKnownDate)) liveById.set(p.carId, p);
   });
+  const byKey = new Map();
+  ((tree && tree.carGroups) || []).forEach((g) => (g.cars || []).forEach((c) => {
+    const k = spzKey(c.spz); if (!k) return;
+    const lp = liveById.get(c.carID); // živá data, pokud auto zrovna jede
+    const pos = c.position || {};
+    byKey.set(k, {
+      carId: c.carID,
+      latitude: lp ? lp.latitude : pos.latitude,
+      longitude: lp ? lp.longitude : pos.longitude,
+      lastKnownDate: lp ? lp.lastKnownDate : c.lastKnownDate,
+      direction: lp ? lp.direction : c.lastKnownDirection,
+      driverName: (lp && lp.driverName) || c.lastKnownDriver || "",
+      speed: lp ? lp.speed : 0,
+      isKeyOn: lp ? !!lp.isKeyOn : false,
+    });
+  }));
   monPosCache = { exp: Date.now() + 20e3, byKey };
   return byKey;
 }
