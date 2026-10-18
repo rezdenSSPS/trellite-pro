@@ -931,20 +931,27 @@ function renderFleet(box, data) {
 /* ---------- Živá poloha z monitoringu (online-monitoring.cz) ----------
    Načítá se líně: teprve po rozkliknutí auta. Do monitoringu se tedy
    přihlásíme (server-side) až v tu chvíli, ne při otevření záložky. */
+let carPosTimer = null;
 function carPositionPopover(anchor, v) {
+  if (carPosTimer) { clearInterval(carPosTimer); carPosTimer = null; }
   const body = document.createElement("div"); body.className = "car-pos-pop";
   body.innerHTML = gpsSkeleton();
   popover(anchor, "Poloha · " + v.spz, body);
   loadCarPosition(v, body);
+  // Dokud je popover otevřený, tiše obnovuj (jedoucí auto → živá rychlost a čas)
+  carPosTimer = setInterval(() => {
+    if (!body.isConnected) { clearInterval(carPosTimer); carPosTimer = null; return; }
+    loadCarPosition(v, body, true);
+  }, 15e3);
 }
-async function loadCarPosition(v, body) {
+async function loadCarPosition(v, body, silent) {
   const b = getBoard(); if (!b) return;
   let j;
   try { j = await intGet(`/board/${b.id}/gps`); }
-  catch (e) { if (!e.unauth && body.isConnected) body.innerHTML = `<div class="muted-sm">Polohu se nepodařilo načíst.</div>`; return; }
+  catch (e) { if (!silent && !e.unauth && body.isConnected) body.innerHTML = `<div class="muted-sm">Polohu se nepodařilo načíst.</div>`; return; }
   if (!body.isConnected) return; // popover se mezitím zavřel
-  if (!j || !j.enabled) { body.innerHTML = `<div class="muted-sm">Propojení s monitoringem zatím není nastavené.</div>`; return; }
-  if (j.error) { body.innerHTML = `<div class="muted-sm">${escapeHtml(j.error)}</div>`; return; }
+  if (!j || !j.enabled) { if (!silent) body.innerHTML = `<div class="muted-sm">Propojení s monitoringem zatím není nastavené.</div>`; return; }
+  if (j.error) { if (!silent) body.innerHTML = `<div class="muted-sm">${escapeHtml(j.error)}</div>`; return; }
   body.innerHTML = gpsDetail((j.positions || {})[v.id]);
 }
 function gpsSkeleton() {
@@ -959,9 +966,13 @@ function gpsDetail(p) {
   const stale = !t || Date.now() - t > 36e5; // starší než hodina → bez čerstvého signálu
   const cls = stale ? "off" : p.moving ? "go" : p.keyOn ? "idle" : "park";
   const label = stale ? "Bez čerstvého signálu" : p.moving ? `Jede ${num(p.speed)} km/h` : p.keyOn ? "Motor běží, stojí" : "Zaparkováno";
+  // Šipka směru jízdy (0° = sever); ↑ ukazuje na sever, otočíme o azimut
+  const arrow = !stale && p.moving && p.direction != null ? `<span class="gps-arrow" style="transform:rotate(${Number(p.direction)}deg)">↑</span>` : "";
+  const addr = (p.address || "").replace(/;\s*/g, ", ");
   const maps = `https://www.google.com/maps?q=${p.lat},${p.lon}`;
   return `<div class="gps-detail">
-    <div class="gps-status"><span class="gps-dot ${cls}"></span><span class="gps-label">${escapeHtml(label)}</span></div>
+    <div class="gps-status"><span class="gps-dot ${cls}"></span>${arrow}<span class="gps-label">${escapeHtml(label)}</span></div>
+    ${addr ? `<div class="gps-addr">${escapeHtml(addr)}</div>` : ""}
     <div class="gps-rows">
       <div><span class="pf-label">Poslední poloha</span><span class="mono">${t ? escapeHtml(relTime(t)) : "—"}</span></div>
       ${p.driver ? `<div><span class="pf-label">Řidič</span><span>${escapeHtml(p.driver)}</span></div>` : ""}

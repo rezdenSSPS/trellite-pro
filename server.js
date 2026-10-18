@@ -772,28 +772,39 @@ const MON = {
 const monEnabled = () => !!(MON.url && MON.user && MON.pass);
 let monAuth = null; // { token, exp }
 
-async function monFetch(path, { method = "GET", body, auth = true, timeout = 20e3 } = {}) {
+async function monFetch(path, { method = "GET", body, auth = true, timeout = 20e3, _retry = true } = {}) {
   const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), timeout);
   try {
     const headers = { "Content-Type": "application/json" };
     if (auth) headers.Authorization = "Bearer " + (await monToken());
     const r = await fetch(MON.url + path, { method, headers, body: body ? JSON.stringify(body) : undefined, signal: ctrl.signal });
-    if (r.status === 401) { monAuth = null; throw new Error("unauthorized"); }
+    if (r.status === 401) {
+      monAuth = null; // token vypršel / byl zneplatněn – zahodit a jednou to zkusit znovu s čerstvým
+      if (auth && _retry) return monFetch(path, { method, body, auth, timeout, _retry: false });
+      throw new Error("unauthorized");
+    }
     if (!r.ok) throw new Error("HTTP " + r.status);
     const t = await r.text();
     return t ? JSON.parse(t) : null;
   } finally { clearTimeout(timer); }
 }
-// JWT z /api/Authorize/Token; obnoví se, jakmile se blíží expirace (token se neloguje)
+// JWT z /api/Authorize/Token; obnoví se, jakmile se blíží expirace (token se neloguje).
+// Single-flight: při souběhu se přihlásíme jen jednou a ostatní na to počkají.
+let monLoginPromise = null;
 async function monToken() {
   if (monAuth && monAuth.exp > Date.now() + 60e3) return monAuth.token;
-  const data = await monFetch("/api/Authorize/Token", {
-    method: "POST", auth: false,
-    body: { username: MON.user, password: MON.pass, workspaceId: MON.workspace },
-  });
-  if (!data || !data.accessToken) throw new Error("login_failed");
-  monAuth = { token: data.accessToken, exp: Date.now() + (Number(data.expiresIn) || 3600) * 1e3 };
-  return monAuth.token;
+  if (!monLoginPromise) {
+    monLoginPromise = (async () => {
+      const data = await monFetch("/api/Authorize/Token", {
+        method: "POST", auth: false,
+        body: { username: MON.user, password: MON.pass, workspaceId: MON.workspace },
+      });
+      if (!data || !data.accessToken) throw new Error("login_failed");
+      monAuth = { token: data.accessToken, exp: Date.now() + (Number(data.expiresIn) || 3600) * 1e3 };
+      return monAuth.token;
+    })().finally(() => { monLoginPromise = null; });
+  }
+  return monLoginPromise;
 }
 // Poslední poloha každého auta podle SPZ; krátká cache sdílená mezi uživateli
 const spzKey = (s) => String(s || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
@@ -810,6 +821,24 @@ async function monPositions() {
   monPosCache = { exp: Date.now() + 20e3, byKey };
   return byKey;
 }
+// Poslední adresa auta (reverzní geokódování dělá monitoring sám). Cache 60 s
+// per auto; dotahujeme jen ty, které v cache nejsou nebo vypršely. Adresa je
+// nice-to-have – její výpadek polohu neshodí.
+const monAddr = new Map(); // carId -> { address, exp }
+async function monAddresses(carIds) {
+  if (!carIds.length) return new Map();
+  const now = Date.now();
+  const need = carIds.filter((id) => { const h = monAddr.get(id); return !h || h.exp <= now; });
+  if (need.length) {
+    try {
+      const data = await monFetch("/api/Car/LastAddresses", { method: "POST", body: { carIds: need } });
+      ((data && data.carAddresses) || []).forEach((a) => monAddr.set(a.carId, { address: a.address, exp: now + 60e3 }));
+    } catch (e) { /* adresa je nepovinná */ }
+  }
+  const out = new Map();
+  carIds.forEach((id) => { const h = monAddr.get(id); if (h) out.set(id, h.address); });
+  return out;
+}
 
 // Živé polohy aut města; stejná práva jako záložka Vozidla. Vrací jen auta
 // z vozového parku města (cizí polohy se ven nedostanou).
@@ -820,13 +849,18 @@ app.get("/api/integrace/board/:boardId/gps", requireAuth, async (req, res) => {
   try {
     const [byKey, all] = await Promise.all([monPositions(), upstream("smenovnik", "/vozidla")]);
     const cities = FLEET[ctx.city] || [ctx.city];
-    const positions = {};
+    const matched = [];
     all.filter((v) => cities.includes(v.city)).forEach((v) => {
-      const p = byKey.get(spzKey(v.spz)); if (!p) return;
-      positions[v.id] = {
+      const p = byKey.get(spzKey(v.spz)); if (p) matched.push({ id: v.id, v, p });
+    });
+    const addrs = await monAddresses([...new Set(matched.map((m) => m.p.carId).filter(Boolean))]);
+    const positions = {};
+    matched.forEach(({ id, v, p }) => {
+      positions[id] = {
         spz: v.spz, lat: p.latitude, lon: p.longitude, speed: Math.max(0, Math.round(p.speed || 0)),
         keyOn: !!p.isKeyOn, moving: !!p.isKeyOn && (p.speed || 0) > 3,
         at: p.lastKnownDate, direction: p.direction, driver: (p.driverName || "").trim(),
+        address: addrs.get(p.carId) || "",
       };
     });
     res.json({ enabled: true, positions, at: Date.now() });

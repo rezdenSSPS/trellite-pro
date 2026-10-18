@@ -741,6 +741,8 @@ a.pill-btn, a.primary-btn { text-decoration: none; }
 .gps-dot.park { background: var(--text-2); }
 .gps-dot.off { background: var(--border); }
 .gps-label { font-weight: 600; color: var(--text); }
+.gps-arrow { display: inline-block; font-weight: 700; color: var(--ok); line-height: 1; transition: transform .3s ease; }
+.gps-addr { font-size: 13px; color: var(--text); }
 .gps-rows { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
 .gps-rows > div { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 /* Skeleton loading */
