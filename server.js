@@ -255,7 +255,7 @@ function noteComments(card, prevComments, actorId) {
 /* ============================================================
    PUSH UPOZORNĚNÍ (Web Push — iPhone od iOS 16.4 po přidání na plochu)
    ============================================================ */
-const NOTIFY_DEFAULTS = { assign: true, comment: true, due: true, fault: true };
+const NOTIFY_DEFAULTS = { assign: true, comment: true, due: true, fault: true, speed: true };
 const notifyPrefs = (u) => Object.assign({}, NOTIFY_DEFAULTS, u.notify || {});
 const cardUrl = (id) => "/#card=" + id;
 let pushReady = false;
@@ -975,6 +975,78 @@ async function pollFaults() {
   if (changed) persist();
 }
 setInterval(() => { pollFaults().catch((e) => console.error("pollFaults", e)); }, FAULT_POLL_MS);
+
+/* ------------------------------------------------------------
+   HLÍDAČ RYCHLOSTI — jednou za hodinu projde knihu jízd každého auta
+   a na každou jízdu s maxSpeed > SPEED_LIMIT (km/h) upozorní adminy
+   push notifikací. Každá jízda jen jednou (podle driveBookId). První
+   běh po nasazení se bere jako výchozí stav – staré jízdy nehlásí.
+   ------------------------------------------------------------ */
+const SPEED_LIMIT = Number(process.env.SPEED_LIMIT) || 150;
+const SPEED_POLL_MS = Number(process.env.SPEED_POLL_MS) || 3600e3;
+// ISO čas v pásmu Europe/Prague s offsetem (±HH:MM), bez externích knihoven; řeší i letní čas
+function pragueIso(ms) {
+  const d = new Date(ms);
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/Prague", year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+  }).formatToParts(d).filter((p) => p.type !== "literal").map((p) => [p.type, p.value]));
+  const asUTC = Date.UTC(+parts.year, +parts.month - 1, +parts.day, +(parts.hour % 24), +parts.minute, +parts.second);
+  const offMin = Math.round((asUTC - d.getTime()) / 60000);
+  const sign = offMin >= 0 ? "+" : "-", abs = Math.abs(offMin);
+  const oh = String(Math.floor(abs / 60)).padStart(2, "0"), om = String(abs % 60).padStart(2, "0");
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}${sign}${oh}:${om}`;
+}
+// Kniha jízd je zanořená: driveBooks[] (dny) → driveBooks.driveBooks[] (jízdy)
+function flattenDriveBooks(data) {
+  const out = [];
+  ((data && data.driveBooks) || []).forEach((day) => {
+    const list = day && day.driveBooks && day.driveBooks.driveBooks;
+    (list || []).forEach((t) => out.push(t));
+  });
+  return out;
+}
+let speedPollRunning = false;
+async function pollSpeeding() {
+  if (!DOC || !monEnabled()) return;
+  const admins = DOC.users.filter(isAdmin);
+  if (!admins.length || speedPollRunning) return;
+  speedPollRunning = true;
+  try {
+    DOC.speedAlerts = DOC.speedAlerts || { seen: {} };
+    const sa = DOC.speedAlerts; const seen = sa.seen;
+    const firstRun = !sa.initialized; // po nasazení nezaplavit starými jízdami
+    const now = Date.now();
+    const from = pragueIso(now - 3 * 3600e3), to = pragueIso(now); // okno 3 h, duplicity řeší driveBookId
+    let tree;
+    try { tree = await monFetch("/api/Car/GroupHierarchy"); } catch (e) { return; }
+    const cars = ((tree && tree.carGroups) || []).flatMap((g) => g.cars || []);
+    let changed = false;
+    for (const c of cars) {
+      let data;
+      try { data = await monFetch(`/api/DriveBook/car/${c.carID}`, { method: "POST", body: { from, to, timezone: "Europe/Prague", type: -1, driver: 0 } }); }
+      catch (e) { continue; } // jedno auto selže → ostatní dál
+      for (const trip of flattenDriveBooks(data)) {
+        if (!(trip.maxSpeed > SPEED_LIMIT) || !trip.driveBookId || seen[trip.driveBookId]) continue;
+        seen[trip.driveBookId] = now; changed = true;
+        if (firstRun) continue; // výchozí stav – jen zapamatovat, neupozorňovat
+        const when = new Date(trip.dateTimeStop || trip.dateTimeStart).toLocaleString("cs-CZ", { timeZone: "Europe/Prague", day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit" });
+        const place = (trip.stopDescription || trip.startDescription || "").replace(/;\s*/g, ", ");
+        admins.forEach((u) => notifyUser(u, "speed", {
+          title: `Překročení rychlosti · ${c.spz}`,
+          body: `${Math.round(trip.maxSpeed)} km/h${when ? " · " + when : ""}${place ? " · " + place : ""}`,
+          url: "/", tag: "speed-" + trip.driveBookId,
+        }));
+      }
+    }
+    for (const [id, ts] of Object.entries(seen)) if (now - ts > 14 * 864e5) { delete seen[id]; changed = true; }
+    if (!sa.initialized) { sa.initialized = true; changed = true; }
+    sa.lastCheck = now;
+    if (changed) persist();
+  } finally { speedPollRunning = false; }
+}
+setInterval(() => { pollSpeeding().catch((e) => console.error("pollSpeeding", e)); }, SPEED_POLL_MS);
+setTimeout(() => { pollSpeeding().catch((e) => console.error("pollSpeeding", e)); }, 60e3); // první kontrola krátce po startu
 
 // PDF smlouvy — jen pro toho, kdo smí vidět lidi aspoň v jednom městě ze smlouvy
 app.get("/api/integrace/smlouva/:id", requireAuth, async (req, res) => {

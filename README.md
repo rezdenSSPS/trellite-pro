@@ -78,6 +78,18 @@ Doporučení: pro integraci si u monitoringu vyžádejte **zvláštní účet je
 privátní API webové aplikace (není oficiální), takže jejich větší update může
 tvar dat změnit — napojení je proto napsané tolerantně.
 
+### Hlídač rychlosti
+
+Jednou za hodinu server projde knihu jízd každého auta a na každou jízdu
+s maximální rychlostí nad limit pošle push upozornění všem **adminům**.
+Každá jízda se hlásí jen jednou. První běh po nasazení se bere jako výchozí
+stav (staré jízdy nehlásí). Běží jen při nastaveném `MONITORING_*`.
+
+| Proměnná | Kde | Hodnota |
+|---|---|---|
+| `SPEED_LIMIT` | Trello | práh v km/h (výchozí `150`) |
+| `SPEED_POLL_MS` | Trello | perioda kontroly v ms (výchozí `3600000` = 1 h) |
+
 ## API
 
 | Metoda | Cesta         | Popis                              |
