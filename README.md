@@ -57,6 +57,27 @@ Oprávnění: záložka **Lidé** se řídí viditelností seznamu „Zaměstnan
 **Vozidla** seznamu „Vozidla“ — komu admin seznam skryje, nevidí ani data.
 **Výplaty** vidí každý, kdo vidí nástěnku.
 
+## Živá poloha aut (GPS)
+
+Když je nastavené propojení na [online-monitoring.cz](https://login.online-monitoring.cz),
+ukáže karta vozu v záložce **Vozidla** živý stav — jede / motor běží / zaparkováno,
+rychlost, čas poslední polohy a odkaz na mapu. Server se k monitoringu přihlašuje
+jménem a heslem, token (JWT, ~1 h) drží jen v paměti a sám ho obnovuje; prohlížeč
+heslo ani token nikdy nevidí. Polohy se párují na auta ze šichtovnice podle SPZ.
+Výpadek monitoringu Vozidla nerozbije — jen zmizí GPS odznak.
+
+| Proměnná | Kde | Hodnota |
+|---|---|---|
+| `MONITORING_URL` | Trello | `https://login.online-monitoring.cz:9888` |
+| `MONITORING_USER` | Trello | přihlašovací jméno k monitoringu |
+| `MONITORING_PASS` | Trello | heslo k monitoringu |
+| `MONITORING_WORKSPACE` | Trello | ID workspace (nepovinné, výchozí `1`) |
+
+Doporučení: pro integraci si u monitoringu vyžádejte **zvláštní účet jen pro
+čtení poloh**, ať případný únik hesla neumožní nic měnit. Pozn.: využívá se
+privátní API webové aplikace (není oficiální), takže jejich větší update může
+tvar dat změnit — napojení je proto napsané tolerantně.
+
 ## API
 
 | Metoda | Cesta         | Popis                              |

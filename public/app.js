@@ -928,6 +928,46 @@ function renderFleet(box, data) {
   data.vozidla.forEach((v) => grid.appendChild(carCardEl(v, data)));
   box.appendChild(grid);
 }
+/* ---------- Živá poloha z monitoringu (online-monitoring.cz) ----------
+   Načítá se líně: teprve po rozkliknutí auta. Do monitoringu se tedy
+   přihlásíme (server-side) až v tu chvíli, ne při otevření záložky. */
+function carPositionPopover(anchor, v) {
+  const body = document.createElement("div"); body.className = "car-pos-pop";
+  body.innerHTML = gpsSkeleton();
+  popover(anchor, "Poloha · " + v.spz, body);
+  loadCarPosition(v, body);
+}
+async function loadCarPosition(v, body) {
+  const b = getBoard(); if (!b) return;
+  let j;
+  try { j = await intGet(`/board/${b.id}/gps`); }
+  catch (e) { if (!e.unauth && body.isConnected) body.innerHTML = `<div class="muted-sm">Polohu se nepodařilo načíst.</div>`; return; }
+  if (!body.isConnected) return; // popover se mezitím zavřel
+  if (!j || !j.enabled) { body.innerHTML = `<div class="muted-sm">Propojení s monitoringem zatím není nastavené.</div>`; return; }
+  if (j.error) { body.innerHTML = `<div class="muted-sm">${escapeHtml(j.error)}</div>`; return; }
+  body.innerHTML = gpsDetail((j.positions || {})[v.id]);
+}
+function gpsSkeleton() {
+  return `<div class="gps-detail">
+    <div class="gps-status"><span class="skeleton skeleton-dot"></span><span class="skeleton skeleton-line" style="width:130px"></span></div>
+    <div class="gps-rows"><span class="skeleton skeleton-line" style="width:180px"></span><span class="skeleton skeleton-line" style="width:110px"></span></div>
+    <span class="skeleton skeleton-btn"></span></div>`;
+}
+function gpsDetail(p) {
+  if (!p) return `<div class="muted-sm">Pro tohle auto nejsou v monitoringu žádná data — zkontrolujte, že SPZ sedí.</div>`;
+  const t = new Date(p.at).getTime();
+  const stale = !t || Date.now() - t > 36e5; // starší než hodina → bez čerstvého signálu
+  const cls = stale ? "off" : p.moving ? "go" : p.keyOn ? "idle" : "park";
+  const label = stale ? "Bez čerstvého signálu" : p.moving ? `Jede ${num(p.speed)} km/h` : p.keyOn ? "Motor běží, stojí" : "Zaparkováno";
+  const maps = `https://www.google.com/maps?q=${p.lat},${p.lon}`;
+  return `<div class="gps-detail">
+    <div class="gps-status"><span class="gps-dot ${cls}"></span><span class="gps-label">${escapeHtml(label)}</span></div>
+    <div class="gps-rows">
+      <div><span class="pf-label">Poslední poloha</span><span class="mono">${t ? escapeHtml(relTime(t)) : "—"}</span></div>
+      ${p.driver ? `<div><span class="pf-label">Řidič</span><span>${escapeHtml(p.driver)}</span></div>` : ""}
+    </div>
+    <a class="pop-btn" href="${maps}" target="_blank" rel="noopener">Ukázat na mapě</a></div>`;
+}
 function bindFaultButtons(root, data) {
   root.querySelectorAll(".fault-done").forEach((b) => b.onclick = () => {
     const v = data.vozidla.find((x) => (x.hlaseni || []).some((h) => String(h.id) === b.dataset.id)); if (!v) return;
@@ -935,7 +975,8 @@ function bindFaultButtons(root, data) {
   });
 }
 function carCardEl(v, data) {
-  const card = document.createElement("div"); card.className = "car-card" + (v.is_active ? "" : " inactive");
+  const card = document.createElement("div"); card.className = "car-card car-clickable" + (v.is_active ? "" : " inactive");
+  card.title = "Zobrazit polohu";
   const st = serviceState(v); const s = v.posledni_servis;
   const sinceKm = v.servis_posledni_km && v.km_aktualni != null ? v.km_aktualni - v.servis_posledni_km.km : null;
   const pct = sinceKm != null ? Math.max(0, Math.min(100, Math.round(sinceKm / v.servis_interval_km * 100))) : 0;
@@ -957,6 +998,8 @@ function carCardEl(v, data) {
   card.querySelector(".car-faults-btn").onclick = (e) => carFaultsPopover(e.currentTarget, v, data, faults, openF.length);
   card.querySelector(".car-report").onclick = (e) => reportFaultPopover(e.currentTarget, v);
   card.querySelector(".car-service-btn").onclick = (e) => servicePopover(e.currentTarget, v);
+  // Poloha z monitoringu se tahá líně – až po rozkliknutí auta (nejdřív skeleton)
+  card.addEventListener("click", (e) => { if (e.target.closest("button, a")) return; carPositionPopover(card.querySelector(".car-spz"), v); });
   return card;
 }
 function carFaultsPopover(anchor, v, data, faults, openCount) {

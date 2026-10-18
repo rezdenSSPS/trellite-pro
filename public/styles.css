@@ -730,6 +730,28 @@ a.pill-btn, a.primary-btn { text-decoration: none; }
 .car-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .car-spz { font-size: 18px; font-weight: 600; letter-spacing: .04em; }
 .car-label { font-size: 14px; color: var(--text-2); }
+.car-clickable { cursor: pointer; }
+.car-clickable:hover { border-color: var(--accent); }
+/* Detail polohy v popoveru */
+.gps-detail { display: flex; flex-direction: column; gap: 12px; min-width: 220px; }
+.gps-status { display: flex; align-items: center; gap: 8px; }
+.gps-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; background: var(--muted); }
+.gps-dot.go { background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); }
+.gps-dot.idle { background: var(--warn); box-shadow: 0 0 0 3px var(--warn-soft); }
+.gps-dot.park { background: var(--text-2); }
+.gps-dot.off { background: var(--border); }
+.gps-label { font-weight: 600; color: var(--text); }
+.gps-rows { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.gps-rows > div { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+/* Skeleton loading */
+.skeleton { position: relative; overflow: hidden; background: var(--subtle); border-radius: var(--radius-sm); }
+.skeleton::after { content: ""; position: absolute; inset: 0; transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.18), transparent); animation: skeleton-shimmer 1.2s infinite; }
+.skeleton-line { display: inline-block; height: 12px; }
+.skeleton-dot { width: 10px; height: 10px; border-radius: 50%; }
+.skeleton-btn { height: 34px; border-radius: var(--radius-md, 8px); }
+@keyframes skeleton-shimmer { 100% { transform: translateX(100%); } }
+@media (prefers-reduced-motion: reduce) { .skeleton::after { animation: none; } }
 .car-note { font-size: 13px; color: var(--text-2); background: var(--subtle); border-radius: var(--radius-sm); padding: 6px 9px; }
 .car-service { font-size: 13px; }
 

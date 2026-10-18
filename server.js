@@ -756,6 +756,83 @@ app.get("/api/integrace/board/:boardId/vozidla", requireAuth, async (req, res) =
   } catch (e) { res.status(502).json({ error: "upstream", message: upstreamError(e) }); }
 });
 
+/* ------------------------------------------------------------
+   GPS — online-monitoring.cz (živé polohy aut)
+   Přihlášení jménem/heslem je server-side; prohlížeč heslo ani token
+   nevidí. JWT platí ~1 h a cachuje se; polohy se párují na vozidla
+   ze šichtovnice podle SPZ. Výpadek monitoringu Vozidla nerozbije —
+   jen zmizí GPS odznak.
+   ------------------------------------------------------------ */
+const MON = {
+  url: (process.env.MONITORING_URL || "").replace(/\/$/, ""),
+  user: process.env.MONITORING_USER || "",
+  pass: process.env.MONITORING_PASS || "",
+  workspace: Number(process.env.MONITORING_WORKSPACE) || 1,
+};
+const monEnabled = () => !!(MON.url && MON.user && MON.pass);
+let monAuth = null; // { token, exp }
+
+async function monFetch(path, { method = "GET", body, auth = true, timeout = 20e3 } = {}) {
+  const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), timeout);
+  try {
+    const headers = { "Content-Type": "application/json" };
+    if (auth) headers.Authorization = "Bearer " + (await monToken());
+    const r = await fetch(MON.url + path, { method, headers, body: body ? JSON.stringify(body) : undefined, signal: ctrl.signal });
+    if (r.status === 401) { monAuth = null; throw new Error("unauthorized"); }
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const t = await r.text();
+    return t ? JSON.parse(t) : null;
+  } finally { clearTimeout(timer); }
+}
+// JWT z /api/Authorize/Token; obnoví se, jakmile se blíží expirace (token se neloguje)
+async function monToken() {
+  if (monAuth && monAuth.exp > Date.now() + 60e3) return monAuth.token;
+  const data = await monFetch("/api/Authorize/Token", {
+    method: "POST", auth: false,
+    body: { username: MON.user, password: MON.pass, workspaceId: MON.workspace },
+  });
+  if (!data || !data.accessToken) throw new Error("login_failed");
+  monAuth = { token: data.accessToken, exp: Date.now() + (Number(data.expiresIn) || 3600) * 1e3 };
+  return monAuth.token;
+}
+// Poslední poloha každého auta podle SPZ; krátká cache sdílená mezi uživateli
+const spzKey = (s) => String(s || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+let monPosCache = null; // { exp, byKey }
+async function monPositions() {
+  if (monPosCache && monPosCache.exp > Date.now()) return monPosCache.byKey;
+  const data = await monFetch("/api/Car/CarsPositionsByUserID/0");
+  const byKey = new Map();
+  ((data && data.lastPositions) || []).forEach((p) => {
+    const k = spzKey(p.carSPZ); if (!k) return;
+    const prev = byKey.get(k); // vrací i víc bodů na auto – nech ten nejnovější
+    if (!prev || String(p.lastKnownDate) > String(prev.lastKnownDate)) byKey.set(k, p);
+  });
+  monPosCache = { exp: Date.now() + 20e3, byKey };
+  return byKey;
+}
+
+// Živé polohy aut města; stejná práva jako záložka Vozidla. Vrací jen auta
+// z vozového parku města (cizí polohy se ven nedostanou).
+app.get("/api/integrace/board/:boardId/gps", requireAuth, async (req, res) => {
+  const ctx = await intBoard(req, res); if (!ctx) return;
+  if (!tabAllowed(req.user, ctx.b, "Vozidla") || !tabVisible(req.user, ctx.b, "vozidla")) return res.status(403).json({ error: "forbidden" });
+  if (!monEnabled()) return res.json({ enabled: false, positions: {} });
+  try {
+    const [byKey, all] = await Promise.all([monPositions(), upstream("smenovnik", "/vozidla")]);
+    const cities = FLEET[ctx.city] || [ctx.city];
+    const positions = {};
+    all.filter((v) => cities.includes(v.city)).forEach((v) => {
+      const p = byKey.get(spzKey(v.spz)); if (!p) return;
+      positions[v.id] = {
+        spz: v.spz, lat: p.latitude, lon: p.longitude, speed: Math.max(0, Math.round(p.speed || 0)),
+        keyOn: !!p.isKeyOn, moving: !!p.isKeyOn && (p.speed || 0) > 3,
+        at: p.lastKnownDate, direction: p.direction, driver: (p.driverName || "").trim(),
+      };
+    });
+    res.json({ enabled: true, positions, at: Date.now() });
+  } catch (e) { res.json({ enabled: true, error: upstreamError(e), positions: {} }); }
+});
+
 // Zápis k autu smí jen ten, kdo vidí záložku Vozidla, a jen k autu z vozového parku města
 async function fleetCar(req, res) {
   const ctx = await intBoard(req, res); if (!ctx) return null;
