@@ -40,6 +40,12 @@ const ICONS = {
   phone: '<path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.5c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/>',
   mail: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/>',
   moon: '<path d="M21 12.5A8.5 8.5 0 1 1 11.5 3 6.5 6.5 0 0 0 21 12.5z"/>',
+  mapPin: '<path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/>',
+  navigation: '<path d="M3 11l18-8-8 18-2-8z"/>',
+  refresh: '<path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/>',
+  external: '<path d="M7 17L17 7"/><path d="M9 7h8v8"/>',
+  chevronRight: '<path d="M9 6l6 6-6 6"/>',
+  arrowLeft: '<path d="M15 6l-6 6 6 6"/>',
   key: '<circle cx="8" cy="15" r="4"/><path d="M11 12 20 3"/><path d="M17 6l2 2"/><path d="M15 8l2 2"/>',
   alert: '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
 };
@@ -503,7 +509,7 @@ const num = (n) => new Intl.NumberFormat("cs-CZ", { maximumFractionDigits: 1 }).
 const fmtDate = (v) => v ? new Date(v).toLocaleDateString("cs-CZ", { day: "numeric", month: "numeric", year: "numeric" }) : "";
 const colorFor = (s) => LABEL_COLORS[[...String(s)].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7) % LABEL_COLORS.length];
 
-function hideIntegration() { el("boardTabs").hidden = true; el("intView").hidden = true; el("listChips").hidden = true; closePerson(); }
+function hideIntegration() { closeCarDetail(); el("boardTabs").hidden = true; el("intView").hidden = true; el("listChips").hidden = true; closePerson(); }
 
 async function intGet(path) {
   const r = await fetch("/api/integrace" + path, { credentials: "same-origin" });
@@ -928,56 +934,212 @@ function renderFleet(box, data) {
   data.vozidla.forEach((v) => grid.appendChild(carCardEl(v, data)));
   box.appendChild(grid);
 }
-/* ---------- Živá poloha z monitoringu (online-monitoring.cz) ----------
-   Načítá se líně: teprve po rozkliknutí auta. Do monitoringu se tedy
-   přihlásíme (server-side) až v tu chvíli, ne při otevření záložky. */
-let carPosTimer = null;
-function carPositionPopover(anchor, v) {
-  if (carPosTimer) { clearInterval(carPosTimer); carPosTimer = null; }
-  const body = document.createElement("div"); body.className = "car-pos-pop";
-  body.innerHTML = gpsSkeleton();
-  popover(anchor, "Poloha · " + v.spz, body);
-  loadCarPosition(v, body);
-  // Dokud je popover otevřený, tiše obnovuj (jedoucí auto → živá rychlost a čas)
-  carPosTimer = setInterval(() => {
-    if (!body.isConnected) { clearInterval(carPosTimer); carPosTimer = null; return; }
-    loadCarPosition(v, body, true);
-  }, 15e3);
+/* ---------- Detail vozidla s živou polohou (online-monitoring.cz) ----------
+   Poloha se načítá líně: do monitoringu se server přihlásí až po otevření
+   detailu auta. Jedna odpověď nese polohy všech aut města, takže po prvním
+   otevření ukazují stav i karty ostatních aut v seznamu. */
+let gpsCache = null;      // { boardId, positions, at }
+let carDetail = null;     // { v, data, timer, map, marker, pos, error }
+const LEAFLET = "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/";
+let leafletLoading = null;
+function loadLeaflet() {
+  if (window.L) return Promise.resolve(window.L);
+  if (leafletLoading) return leafletLoading;
+  leafletLoading = new Promise((resolve, reject) => {
+    const css = document.createElement("link"); css.rel = "stylesheet"; css.href = LEAFLET + "leaflet.min.css"; document.head.appendChild(css);
+    const js = document.createElement("script"); js.src = LEAFLET + "leaflet.min.js"; js.async = true;
+    js.onload = () => resolve(window.L); js.onerror = () => { leafletLoading = null; reject(new Error("leaflet")); };
+    document.head.appendChild(js);
+  });
+  return leafletLoading;
 }
-async function loadCarPosition(v, body, silent) {
-  const b = getBoard(); if (!b) return;
-  let j;
-  try { j = await intGet(`/board/${b.id}/gps`); }
-  catch (e) { if (!silent && !e.unauth && body.isConnected) body.innerHTML = `<div class="muted-sm">Polohu se nepodařilo načíst.</div>`; return; }
-  if (!body.isConnected) return; // popover se mezitím zavřel
-  if (!j || !j.enabled) { if (!silent) body.innerHTML = `<div class="muted-sm">Propojení s monitoringem zatím není nastavené.</div>`; return; }
-  if (j.error) { if (!silent) body.innerHTML = `<div class="muted-sm">${escapeHtml(j.error)}</div>`; return; }
-  body.innerHTML = gpsDetail((j.positions || {})[v.id]);
-}
-function gpsSkeleton() {
-  return `<div class="gps-detail">
-    <div class="gps-status"><span class="skeleton skeleton-dot"></span><span class="skeleton skeleton-line" style="width:130px"></span></div>
-    <div class="gps-rows"><span class="skeleton skeleton-line" style="width:180px"></span><span class="skeleton skeleton-line" style="width:110px"></span></div>
-    <span class="skeleton skeleton-btn"></span></div>`;
-}
-function gpsDetail(p) {
-  if (!p) return `<div class="muted-sm">Pro tohle auto nejsou v monitoringu žádná data — zkontrolujte, že SPZ sedí.</div>`;
+function gpsState(p) {
+  if (!p) return null;
   const t = new Date(p.at).getTime();
   const stale = !t || Date.now() - t > 36e5; // starší než hodina → bez čerstvého signálu
-  const cls = stale ? "off" : p.moving ? "go" : p.keyOn ? "idle" : "park";
-  const label = stale ? "Bez čerstvého signálu" : p.moving ? `Jede ${num(p.speed)} km/h` : p.keyOn ? "Motor běží, stojí" : "Zaparkováno";
-  // Šipka směru jízdy (0° = sever); ↑ ukazuje na sever, otočíme o azimut
-  const arrow = !stale && p.moving && p.direction != null ? `<span class="gps-arrow" style="transform:rotate(${Number(p.direction)}deg)">↑</span>` : "";
-  const addr = (p.address || "").replace(/;\s*/g, ", ");
-  const maps = `https://www.google.com/maps?q=${p.lat},${p.lon}`;
-  return `<div class="gps-detail">
-    <div class="gps-status"><span class="gps-dot ${cls}"></span>${arrow}<span class="gps-label">${escapeHtml(label)}</span></div>
-    ${addr ? `<div class="gps-addr">${escapeHtml(addr)}</div>` : ""}
-    <div class="gps-rows">
-      <div><span class="pf-label">Poslední poloha</span><span class="mono">${t ? escapeHtml(relTime(t)) : "—"}</span></div>
-      ${p.driver ? `<div><span class="pf-label">Řidič</span><span>${escapeHtml(p.driver)}</span></div>` : ""}
+  if (stale) return { cls: "off", label: "Bez čerstvého signálu", big: "—", t, stale };
+  if (p.moving) return { cls: "go", label: "Jede", big: `${num(p.speed)} km/h`, t };
+  if (p.keyOn) return { cls: "idle", label: "Motor běží, stojí", big: "0 km/h", t };
+  return { cls: "park", label: "Zaparkováno", big: "Parkuje", t };
+}
+const COMPASS = ["sever", "severovýchod", "východ", "jihovýchod", "jih", "jihozápad", "západ", "severozápad"];
+const compass = (deg) => COMPASS[Math.round(((Number(deg) % 360) + 360) % 360 / 45) % 8];
+const mapLinks = (p) => ({
+  mapy: `https://mapy.com/fnc/v1/showmap?mapset=basic&center=${p.lon},${p.lat}&zoom=16&marker=true`,
+  google: `https://www.google.com/maps?q=${p.lat},${p.lon}`,
+  route: `https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lon}`,
+});
+// Telefon řidiče: z karty Řidiči (šichtovnice), pokud ji uživatel smí vidět
+function driverPhone(name) {
+  const b = getBoard(); if (!b || !name) return "";
+  const e = intData[`${b.id}:lide`]; const norm = (s) => String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
+  const hit = e && e.data && e.data.people.find((x) => norm(x.name) === norm(name));
+  return hit && hit.phone ? hit.phone : "";
+}
+function openCarDetail(v, data) {
+  closeCarDetail();
+  carDetail = { v, data, pos: undefined, error: "" };
+  el("carOverlay").hidden = false; document.body.classList.add("no-scroll");
+  renderCarDetail();
+  loadCarGps();
+  carDetail.timer = setInterval(() => loadCarGps(true), 15e3);
+  // telefon řidiče: tiše načti záložku Řidiči, pokud ještě není
+  const b = getBoard(); if (b && !intData[`${b.id}:lide`]) intGet(`/board/${b.id}/lide`).then((d) => { intData[`${b.id}:lide`] = { data: d }; if (carDetail) renderCarLive(); }).catch(() => {});
+}
+function closeCarDetail() {
+  if (!carDetail) return;
+  clearInterval(carDetail.timer);
+  if (carDetail.map) carDetail.map.remove();
+  carDetail = null; el("carOverlay").hidden = true; el("carBody").innerHTML = ""; document.body.classList.remove("no-scroll");
+}
+el("carOverlay").addEventListener("click", (e) => { if (e.target === el("carOverlay")) closeCarDetail(); });
+async function loadCarGps(silent) {
+  const b = getBoard(); if (!b || !carDetail) return;
+  const ref = carDetail;
+  let j;
+  try { j = await intGet(`/board/${b.id}/gps`); }
+  catch (e) { if (e.unauth || carDetail !== ref) return; if (!silent || ref.pos === undefined) { ref.error = "Monitoring teď neodpovídá. Zkuste to za chvíli znovu."; ref.pos = null; renderCarLive(); } return; }
+  if (carDetail !== ref) return; // detail se mezitím zavřel
+  if (!j || !j.enabled) { ref.error = "Propojení s monitoringem zatím není nastavené."; ref.pos = null; renderCarLive(); return; }
+  if (j.error) { if (!silent || ref.pos === undefined) { ref.error = j.error; ref.pos = null; renderCarLive(); } return; }
+  gpsCache = { boardId: b.id, positions: j.positions || {}, at: Date.now() };
+  ref.error = ""; ref.pos = (j.positions || {})[ref.v.id] || null;
+  if (!ref.pos) ref.error = "Auto v monitoringu nenalezeno – zkontrolujte, že SPZ ve šichtovnici sedí.";
+  ref.updated = Date.now();
+  renderCarLive(); updateCarMap();
+  updateFleetGpsRows();
+}
+function renderCarDetail() {
+  const { v } = carDetail;
+  el("carBody").innerHTML = `
+    <section class="cd-map" aria-label="Mapa">
+      <div id="cdMapCanvas" class="cd-map-canvas"><div class="cd-map-skeleton skeleton"></div></div>
+      <div id="cdMapStatus" class="cd-map-status" hidden></div>
+      <button class="cd-map-back phone-only-flex" aria-label="Zavřít detail">${icon("arrowLeft", 20)}</button>
+      <div id="cdMapLinks" class="cd-map-links" hidden></div>
+    </section>
+    <section class="cd-panel">
+      <div class="cd-grabber" aria-hidden="true"></div>
+      <header class="cd-head">
+        <div class="cd-head-main"><h2 id="cdTitle" class="cd-spz mono">${escapeHtml(v.spz)}</h2><span class="cd-label">${escapeHtml(v.label || "Bez označení")}</span></div>
+        <button class="modal-close cd-close" aria-label="Zavřít">×</button>
+      </header>
+      <div id="cdLive" class="cd-live"></div>
+      <div id="cdRest"></div>
+    </section>`;
+  el("carBody").querySelector(".cd-close").onclick = closeCarDetail;
+  el("carBody").querySelector(".cd-map-back").onclick = closeCarDetail;
+  renderCarLive(); renderCarRest();
+}
+function renderCarLive() {
+  if (!carDetail) return;
+  const box = el("cdLive"); const { pos, error } = carDetail;
+  const st = gpsState(pos);
+  box.className = "cd-live " + (st ? st.cls : pos === undefined ? "loading" : "none");
+  if (pos === undefined) {
+    box.innerHTML = `<div class="skeleton skeleton-line" style="width:150px;height:30px"></div><div class="skeleton skeleton-line" style="width:220px"></div><div class="skeleton skeleton-line" style="width:180px"></div><div class="muted-sm">Načítám polohu z monitoringu…</div>`;
+    return;
+  }
+  if (!pos) {
+    box.innerHTML = `<div class="cd-live-msg">${escapeHtml(error)}</div><button class="pill-btn cd-retry">${icon("activity", 16)}<span>Zkusit znovu</span></button>`;
+    box.querySelector(".cd-retry").onclick = () => { carDetail.pos = undefined; renderCarLive(); loadCarGps(); };
+    el("cdMapCanvas").classList.add("empty"); el("cdMapCanvas").innerHTML = `<div class="cd-map-empty">${icon("mapPin", 28)}<span>Poloha není k dispozici</span></div>`;
+    return;
+  }
+  const addr = (pos.address || "").replace(/;\s*/g, ", ");
+  const sub = st.stale ? `poslední signál ${relTime(st.t)}` : st.cls === "go" && pos.direction != null ? `směr ${compass(pos.direction)}` : st.cls === "park" ? `od ${new Date(st.t).toLocaleTimeString("cs-CZ", { hour: "2-digit", minute: "2-digit" })}` : "";
+  const phone = driverPhone(pos.driver); const links = mapLinks(pos);
+  box.innerHTML = `
+    <div class="cd-live-top">
+      <div><span class="cd-state"><span class="gps-dot ${st.cls}"></span>${escapeHtml(st.label)}</span><span class="cd-big mono">${escapeHtml(st.big)}</span></div>
+      <span class="cd-sub">${escapeHtml(sub)}</span>
     </div>
-    <a class="pop-btn" href="${maps}" target="_blank" rel="noopener">Ukázat na mapě</a></div>`;
+    ${addr ? `<div class="cd-addr">${icon("mapPin", 16)}<span>${escapeHtml(addr)}</span></div>` : ""}
+    <dl class="cd-facts">
+      <div><dt>Řidič</dt><dd>${escapeHtml(pos.driver || "—")}</dd></div>
+      <div><dt>Motor</dt><dd>${st.stale ? "Neznámý" : pos.keyOn ? "Zapnutý" : "Vypnutý"}</dd></div>
+      <div><dt>Poslední poloha</dt><dd>${st.t ? escapeHtml(relTime(st.t)) : "—"}</dd></div>
+      <div><dt>Souřadnice</dt><dd class="mono">${Number(pos.lat).toFixed(4)}, ${Number(pos.lon).toFixed(4)}</dd></div>
+    </dl>
+    ${st.stale ? `<div class="cd-live-msg">Jednotka v autě se přes hodinu neozvala – auto může stát v garáži bez signálu.</div>` : ""}
+    <div class="cd-live-actions">
+      <a class="primary-btn cd-nav" href="${links.route}" target="_blank" rel="noopener">${icon("navigation", 16)}<span>Navigovat</span></a>
+      ${phone ? `<a class="pill-btn" href="tel:${escapeHtml(phone.replace(/\s+/g, ""))}">${icon("phone", 16)}<span>Zavolat řidiči</span></a>` : ""}
+      <button class="icon-btn cd-refresh" aria-label="Obnovit polohu">${icon("refresh", 16)}</button>
+    </div>`;
+  box.querySelector(".cd-refresh").onclick = () => loadCarGps();
+  const ms = el("cdMapStatus"); ms.hidden = false; ms.className = "cd-map-status " + st.cls;
+  ms.innerHTML = `<span class="gps-dot ${st.cls}"></span>${escapeHtml(st.cls === "go" ? `Jede ${num(pos.speed)} km/h` : st.label)}`;
+  const ml = el("cdMapLinks"); ml.hidden = false;
+  ml.innerHTML = `<span class="cd-updated">Aktualizováno ${escapeHtml(relTime(carDetail.updated || Date.now()))}</span><span class="cd-gap"></span>
+    <a class="cd-maplink" href="${links.mapy}" target="_blank" rel="noopener">Mapy.com ${icon("external", 14)}</a>
+    <a class="cd-maplink" href="${links.google}" target="_blank" rel="noopener">Google Maps ${icon("external", 14)}</a>`;
+}
+function renderCarRest() {
+  if (!carDetail) return;
+  const { v, data } = carDetail; const st = serviceState(v); const s = v.posledni_servis;
+  const sinceKm = v.servis_posledni_km && v.km_aktualni != null ? v.km_aktualni - v.servis_posledni_km.km : null;
+  const pct = sinceKm != null ? Math.max(0, Math.min(100, Math.round(sinceKm / v.servis_interval_km * 100))) : 0;
+  const openF = (v.hlaseni || []).filter((h) => h.status !== "resolved");
+  const box = el("cdRest");
+  box.innerHTML = `
+    <section class="cd-sec">
+      <div class="cd-sec-head"><h3>Servis</h3>${st ? `<span class="cd-service ${st.cls}">${escapeHtml(st.text)}</span>` : `<span class="muted-sm">Servis nezadán</span>`}</div>
+      ${v.servis_posledni_km ? `<div class="progress-bar"><div class="progress-fill ${st ? st.cls : ""}" style="width:${pct}%"></div></div>` : ""}
+      <div class="cd-km"><span>Tachometr <b class="mono">${v.km_aktualni != null ? num(v.km_aktualni) + " km" : "—"}</b></span><span>Za 30 dní <b class="mono">${v.najeto_30_dni != null ? num(v.najeto_30_dni) + " km" : "—"}</b></span></div>
+      <div class="muted-sm">${s ? `Poslední servis ${escapeHtml(fmtDate(s.datum))} · ${escapeHtml(s.popis)}` : "Servis zatím nezapsán"}</div>
+    </section>
+    <section class="cd-sec">
+      <div class="cd-sec-head"><h3>Otevřené závady <span class="section-count">${openF.length}</span></h3></div>
+      ${openF.length ? `<ul class="fault-list">${openF.map((h) => faultItemEl(h, data.canResolve)).join("")}</ul>` : `<p class="muted-sm">Žádné otevřené závady.</p>`}
+    </section>
+    <div class="cd-actions"><button class="primary-btn cd-report">${icon("message", 16)}<span>Nahlásit problém</span></button><button class="pill-btn cd-service-btn">${icon("check", 16)}<span>Servis proveden</span></button></div>`;
+  bindFaultButtons(box, data);
+  box.querySelector(".cd-report").onclick = (e) => reportFaultPopover(e.currentTarget, v);
+  box.querySelector(".cd-service-btn").onclick = (e) => servicePopover(e.currentTarget, v);
+}
+function carMarkerHtml(st, pos) {
+  const rot = st.cls === "go" && pos.direction != null ? Number(pos.direction) : null;
+  return `<div class="cd-marker ${st.cls}">${st.cls === "go" ? `<span class="cd-pulse"></span>` : ""}<span class="cd-pin">${rot != null ? `<svg viewBox="0 0 24 24" style="transform:rotate(${rot}deg)" aria-hidden="true"><path d="M12 3l7 17-7-4-7 4z" fill="#fff"/></svg>` : `<span class="cd-pin-dot"></span>`}</span></div>`;
+}
+async function updateCarMap() {
+  const ref = carDetail; if (!ref || !ref.pos) return;
+  const pos = ref.pos; const st = gpsState(pos);
+  const canvas = el("cdMapCanvas");
+  let L;
+  try { L = await loadLeaflet(); }
+  catch (e) { if (carDetail === ref) { canvas.innerHTML = `<div class="cd-map-empty">${icon("mapPin", 28)}<span>Mapu se nepodařilo načíst – použijte odkazy níže.</span></div>`; } return; }
+  if (carDetail !== ref) return;
+  canvas.classList.toggle("stale", !!st.stale); canvas.classList.remove("empty");
+  const ll = [Number(pos.lat), Number(pos.lon)];
+  const iconL = L.divIcon({ className: "", html: carMarkerHtml(st, pos), iconSize: [44, 44], iconAnchor: [22, 22] });
+  if (!ref.map) {
+    canvas.innerHTML = "";
+    ref.map = L.map(canvas, { zoomControl: false, attributionControl: true }).setView(ll, 15);
+    if (!isPhone()) L.control.zoom({ position: "topright" }).addTo(ref.map);
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(ref.map);
+    ref.marker = L.marker(ll, { icon: iconL, keyboard: false }).addTo(ref.map);
+    setTimeout(() => ref.map && ref.map.invalidateSize(), 50);
+  } else {
+    ref.marker.setLatLng(ll); ref.marker.setIcon(iconL);
+    if (!ref.map.getBounds().pad(-0.2).contains(ll)) ref.map.panTo(ll);
+  }
+}
+// Karty aut v seznamu: po prvním načtení GPS ukazují stav všech aut města
+function gpsRowHtml(v) {
+  const b = getBoard();
+  const p = gpsCache && b && gpsCache.boardId === b.id ? gpsCache.positions[v.id] : undefined;
+  const st = gpsState(p);
+  if (!st) return `<span class="car-gps-ico neutral">${icon("mapPin", 16)}</span><span class="car-gps-main"><b>${p === null || (gpsCache && b && gpsCache.boardId === b.id) ? "Poloha není k dispozici" : "Poloha na mapě"}</b><span>Otevřít detail auta</span></span>`;
+  const rot = st.cls === "go" && p.direction != null ? Number(p.direction) : null;
+  return `<span class="car-gps-ico ${st.cls}">${rot != null ? `<svg viewBox="0 0 24 24" style="transform:rotate(${rot}deg)" aria-hidden="true"><path d="M12 3l7 17-7-4-7 4z" fill="#fff"/></svg>` : `<span class="cd-pin-dot"></span>`}</span>
+    <span class="car-gps-main"><b>${escapeHtml(st.cls === "go" ? `Jede ${num(p.speed)} km/h` : st.label)}</b><span>${escapeHtml([p.driver, st.t ? relTime(st.t) : ""].filter(Boolean).join(" · "))}</span></span>`;
+}
+function updateFleetGpsRows() {
+  document.querySelectorAll(".car-gps-row[data-car]").forEach((row) => {
+    const entry = intData[`${(getBoard() || {}).id}:vozidla`]; const v = entry && entry.data && entry.data.vozidla.find((x) => String(x.id) === row.dataset.car);
+    if (v) { const st = gpsState(gpsCache && gpsCache.positions[v.id]); row.className = "car-gps-row" + (st ? " " + st.cls : ""); row.innerHTML = gpsRowHtml(v) + `<span class="car-gps-more">Na mapě ${icon("chevronRight", 16)}</span>`; }
+  });
 }
 function bindFaultButtons(root, data) {
   root.querySelectorAll(".fault-done").forEach((b) => b.onclick = () => {
@@ -987,7 +1149,7 @@ function bindFaultButtons(root, data) {
 }
 function carCardEl(v, data) {
   const card = document.createElement("div"); card.className = "car-card car-clickable" + (v.is_active ? "" : " inactive");
-  card.title = "Zobrazit polohu";
+  card.title = "Otevřít detail auta";
   const st = serviceState(v); const s = v.posledni_servis;
   const sinceKm = v.servis_posledni_km && v.km_aktualni != null ? v.km_aktualni - v.servis_posledni_km.km : null;
   const pct = sinceKm != null ? Math.max(0, Math.min(100, Math.round(sinceKm / v.servis_interval_km * 100))) : 0;
@@ -1005,12 +1167,16 @@ function carCardEl(v, data) {
     ${v.servis_posledni_km ? `<div class="car-progress" title="Od posledního servisu ${num(sinceKm || 0)} z ${num(v.servis_interval_km)} km"><div class="progress-bar"><div class="progress-fill ${st ? st.cls : ""}" style="width:${pct}%"></div></div></div>` : ""}
     <div class="car-service"><span class="pf-label">Poslední servis</span>${s ? `${escapeHtml(fmtDate(s.datum))} · ${escapeHtml(s.popis)}${s.km ? ` · ${num(s.km)} km` : ""}` : `<span class="muted-sm">zatím nezapsán</span>`}</div>
     ${v.poznamka ? `<div class="car-note">${escapeHtml(v.poznamka)}</div>` : ""}
+    <button class="car-gps-row" data-car="${escapeHtml(String(v.id))}"></button>
     <div class="car-actions"><button class="pill-btn car-faults-btn${openF.length ? " has-open" : ""}">${icon("alert", 16)}<span>Závady${openF.length ? ` · ${openF.length}` : ""}</span></button><button class="pill-btn car-report">${icon("message", 16)}<span>Nahlásit problém</span></button><button class="pill-btn car-service-btn">${icon("check", 16)}<span>Servis proveden</span></button></div>`;
   card.querySelector(".car-faults-btn").onclick = (e) => carFaultsPopover(e.currentTarget, v, data, faults, openF.length);
   card.querySelector(".car-report").onclick = (e) => reportFaultPopover(e.currentTarget, v);
   card.querySelector(".car-service-btn").onclick = (e) => servicePopover(e.currentTarget, v);
-  // Poloha z monitoringu se tahá líně – až po rozkliknutí auta (nejdřív skeleton)
-  card.addEventListener("click", (e) => { if (e.target.closest("button, a")) return; carPositionPopover(card.querySelector(".car-spz"), v); });
+  // Poloha z monitoringu se tahá líně – až po otevření detailu auta
+  const gpsRow = card.querySelector(".car-gps-row"); const gst = gpsState(gpsCache && gpsCache.positions[v.id]);
+  gpsRow.className = "car-gps-row" + (gst ? " " + gst.cls : ""); gpsRow.innerHTML = gpsRowHtml(v) + `<span class="car-gps-more">Na mapě ${icon("chevronRight", 16)}</span>`;
+  gpsRow.onclick = () => openCarDetail(v, data);
+  card.addEventListener("click", (e) => { if (e.target.closest("button, a, summary")) return; openCarDetail(v, data); });
   return card;
 }
 function carFaultsPopover(anchor, v, data, faults, openCount) {
@@ -1028,6 +1194,7 @@ async function carWrite(v, method, sub, body, okMsg) {
     const entry = intData[`${b.id}:vozidla`];
     if (entry && entry.data && j.vozidlo) entry.data.vozidla = entry.data.vozidla.map((x) => x.id === j.vozidlo.id ? j.vozidlo : x);
     closePopover(); toast(okMsg); if (boardTab === "vozidla") renderIntTab();
+    if (carDetail && j.vozidlo && String(carDetail.v.id) === String(j.vozidlo.id)) { carDetail.v = j.vozidlo; renderCarRest(); }
     return true;
   } catch (e) { if (!e.unauth) toast(e.message); return false; }
 }
@@ -1527,7 +1694,7 @@ function changePassword() {
 }
 async function logout() { try { await fetch("/api/logout", { method: "POST", credentials: "same-origin" }); } catch (e) {} if (evtSource) { evtSource.close(); evtSource = null; } me = null; state = null; showLogin(); }
 
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") { if (!el("popover").hidden) return closePopover(); if (!el("personOverlay").hidden) return closePerson(); if (!el("modalOverlay").hidden) return closeModal(); if (!el("drawerOverlay").hidden) return closeDrawer(); } });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") { if (!el("popover").hidden) return closePopover(); if (carDetail) return closeCarDetail(); if (!el("personOverlay").hidden) return closePerson(); if (!el("modalOverlay").hidden) return closeModal(); if (!el("drawerOverlay").hidden) return closeDrawer(); } });
 
 /* ============================================================
    Rychlé přidání karty (tlačítko + na telefonu)

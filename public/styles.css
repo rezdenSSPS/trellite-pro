@@ -1043,3 +1043,122 @@ textarea.pop-input { height: auto; min-height: 96px; padding: 10px 12px; line-he
   .nc-submit .primary-btn { width: 100%; justify-content: center; height: 46px; }
   .people-actions .primary-btn { width: 100%; justify-content: center; }
 }
+
+/* =====================================================================
+   Detail vozidla s živou polohou z GPS
+   ===================================================================== */
+.no-scroll { overflow: hidden; }
+.gps-dot.park { background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.phone-only-flex { display: none; }
+
+/* Řádek polohy na kartě auta */
+.car-gps-row {
+  display: flex; align-items: center; gap: 10px; width: 100%; min-height: 50px; padding: 6px 12px; box-sizing: border-box;
+  border: 0; border-radius: 12px; background: var(--subtle); color: var(--text); font: inherit; text-align: left; cursor: pointer;
+}
+.car-gps-row:hover { background: var(--hover); }
+.car-gps-row.go { background: var(--ok-soft); }
+.car-gps-row.idle { background: var(--warn-soft); }
+.car-gps-row.park { background: var(--accent-soft); }
+.car-gps-ico { width: 30px; height: 30px; flex: 0 0 auto; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; background: var(--muted); color: #fff; }
+.car-gps-ico svg { width: 14px; height: 14px; }
+.car-gps-ico.neutral { background: var(--surface-2); color: var(--accent); border: 1px solid var(--border); }
+.car-gps-ico.go { background: #16A34A; } .car-gps-ico.idle { background: #D97706; } .car-gps-ico.park { background: var(--accent); } .car-gps-ico.off { background: #A1A1AA; }
+.cd-pin-dot { width: 8px; height: 8px; border-radius: 999px; background: #fff; }
+.car-gps-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.car-gps-main b { font-weight: 600; font-size: 14px; }
+.car-gps-row.go .car-gps-main b { color: var(--ok); } .car-gps-row.idle .car-gps-main b { color: var(--warn); } .car-gps-row.park .car-gps-main b { color: var(--accent-soft-ink); }
+.car-gps-main span { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.car-gps-more { display: inline-flex; align-items: center; gap: 2px; font-size: 13px; font-weight: 500; color: var(--accent); flex: 0 0 auto; }
+.car-gps-more .icon { width: 16px; height: 16px; }
+
+/* Okno detailu (PC) */
+.car-overlay { padding: 40px 24px; }
+.car-modal { max-width: 1120px; padding: 0; overflow: hidden; }
+.car-detail { display: flex; flex-wrap: wrap; min-height: 620px; }
+.cd-map { position: relative; flex: 999 1 520px; min-width: 0; min-height: 620px; background: #EEF1EA; }
+.cd-map-canvas { position: absolute; inset: 0; z-index: 0; }
+.cd-map-canvas.stale .leaflet-tile-pane { filter: grayscale(1) opacity(.6); }
+.cd-map-skeleton { position: absolute; inset: 0; border-radius: 0; }
+.cd-map-empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: var(--muted); font-size: 14px; text-align: center; padding: 24px; }
+.cd-map-empty .icon { width: 28px; height: 28px; }
+.cd-map-status { position: absolute; z-index: 500; top: 16px; left: 16px; display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 999px; background: #fff; color: #18181B; box-shadow: 0 2px 10px rgba(0,0,0,.14); font-weight: 600; font-size: 14px; }
+.cd-map-status.go { color: #15803D; } .cd-map-status.idle { color: #9A4A00; } .cd-map-status.park { color: #3730A3; } .cd-map-status.off { color: #52525B; }
+.cd-map-links { position: absolute; z-index: 500; left: 16px; right: 16px; bottom: 22px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; pointer-events: none; }
+.cd-map-links > * { pointer-events: auto; }
+.cd-updated { font-size: 12px; color: #3F3F46; background: rgba(255,255,255,.94); padding: 6px 10px; border-radius: 8px; }
+.cd-gap { flex: 1 1 auto; }
+.cd-maplink { height: 36px; padding: 0 12px; border-radius: 10px; background: #fff; color: #18181B; box-shadow: 0 2px 10px rgba(0,0,0,.14); display: inline-flex; align-items: center; gap: 6px; text-decoration: none; font-size: 13px; font-weight: 500; }
+.cd-maplink .icon { width: 14px; height: 14px; }
+.cd-map-back { position: absolute; z-index: 500; top: 12px; left: 12px; width: 44px; height: 44px; border: 0; border-radius: 999px; background: #fff; color: #18181B; box-shadow: 0 2px 10px rgba(0,0,0,.16); align-items: center; justify-content: center; cursor: pointer; }
+
+/* Značka auta na mapě */
+.cd-marker { position: relative; width: 44px; height: 44px; }
+.cd-pin { position: absolute; inset: 0; border-radius: 999px; border: 3px solid #fff; box-sizing: border-box; box-shadow: 0 4px 12px rgba(0,0,0,.28); display: flex; align-items: center; justify-content: center; background: #A1A1AA; }
+.cd-pin svg { width: 18px; height: 18px; transition: transform .3s ease; }
+.cd-marker.go .cd-pin { background: #16A34A; } .cd-marker.idle .cd-pin { background: #D97706; } .cd-marker.park .cd-pin { background: #4F46E5; }
+.cd-pulse { position: absolute; inset: 0; border-radius: 999px; background: #16A34A; animation: cd-pulse 1.8s ease-out infinite; }
+@keyframes cd-pulse { from { transform: scale(.6); opacity: .55; } to { transform: scale(2.4); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .cd-pulse { animation: none; opacity: 0; } }
+
+/* Panel s údaji */
+.cd-panel { flex: 1 1 380px; min-width: 0; padding: 22px 24px 24px; box-sizing: border-box; display: flex; flex-direction: column; gap: 18px; border-left: 1px solid var(--border); background: var(--surface); }
+.cd-grabber { display: none; }
+.cd-head { display: flex; align-items: flex-start; gap: 12px; }
+.cd-head-main { flex: 1 1 auto; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.cd-spz { align-self: flex-start; margin: 0; font-size: 20px; font-weight: 500; letter-spacing: .04em; padding: 3px 10px; border: 2px solid var(--text); border-radius: 7px; }
+.cd-label { color: var(--text-2); }
+.cd-close { position: static; flex: 0 0 auto; }
+.cd-live { border-radius: 14px; padding: 16px; display: flex; flex-direction: column; gap: 12px; background: var(--subtle); }
+.cd-live.go { background: var(--ok-soft); } .cd-live.idle { background: var(--warn-soft); } .cd-live.park { background: var(--accent-soft); }
+.cd-live-top { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
+.cd-live-top > div { display: flex; flex-direction: column; gap: 2px; }
+.cd-state { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; }
+.cd-live.go .cd-state { color: var(--ok); } .cd-live.idle .cd-state { color: var(--warn); } .cd-live.park .cd-state { color: var(--accent-soft-ink); }
+.cd-big { font-size: 32px; font-weight: 500; letter-spacing: -.02em; color: var(--text); }
+.cd-sub { font-size: 13px; color: var(--text-2); text-align: right; }
+.cd-addr { display: flex; gap: 8px; align-items: flex-start; font-size: 14px; line-height: 1.4; }
+.cd-addr .icon { width: 16px; height: 16px; color: var(--muted); margin-top: 2px; flex: 0 0 auto; }
+.cd-facts { margin: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 16px; }
+.cd-facts div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.cd-facts dt { font-size: 12px; color: var(--muted); }
+.cd-facts dd { margin: 0; font-weight: 500; overflow-wrap: anywhere; }
+.cd-facts dd.mono { font-size: 13px; font-weight: 400; }
+.cd-live-msg { font-size: 13px; line-height: 1.45; color: var(--text-2); }
+.cd-live-actions { display: flex; gap: 8px; }
+.cd-live-actions .primary-btn, .cd-live-actions .pill-btn { flex: 1 1 auto; justify-content: center; height: 40px; text-decoration: none; }
+.cd-live-actions .icon-btn { width: 40px; height: 40px; background: var(--surface-2); }
+.cd-retry { align-self: flex-start; }
+.cd-sec { display: flex; flex-direction: column; gap: 8px; }
+.cd-sec-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.cd-sec-head h3 { margin: 0; font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.cd-service { font-size: 13px; font-weight: 500; } .cd-service.danger { color: var(--danger); } .cd-service.warn { color: var(--warn); } .cd-service.ok { color: var(--ok); }
+.cd-sec .progress-bar { height: 8px; flex: none; }
+.cd-km { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; color: var(--text-2); }
+.cd-km b { color: var(--text); font-weight: 500; }
+#cdRest { display: flex; flex-direction: column; gap: 18px; flex: 1 1 auto; }
+.cd-actions { margin-top: auto; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.cd-actions .primary-btn, .cd-actions .pill-btn { height: 42px; justify-content: center; }
+.cd-actions .primary-btn { background: var(--text); color: var(--surface); }
+
+/* Telefon: mapa nahoře, údaje v panelu přes její spodek */
+@media (max-width: 760px) {
+  .car-overlay { padding: 0; }
+  .car-modal { min-height: 100dvh; }
+  .car-detail { display: block; min-height: 100dvh; position: relative; }
+  .cd-map { position: fixed; top: 0; left: 0; right: 0; height: 46dvh; min-height: 0; }
+  .cd-map-back { top: calc(12px + env(safe-area-inset-top)); }
+  .phone-only-flex { display: flex; }
+  .cd-map-status { top: calc(14px + env(safe-area-inset-top)); left: auto; right: 12px; font-size: 13px; }
+  .cd-map-links { bottom: 34px; left: 12px; right: 12px; }
+  .cd-updated { display: none; }
+  .cd-panel { position: relative; z-index: 600; margin-top: calc(46dvh - 22px); min-height: calc(54dvh + 22px); border-left: 0; border-radius: 22px 22px 0 0; box-shadow: 0 -8px 24px rgba(24,24,27,.12); padding: 8px 16px calc(28px + env(safe-area-inset-bottom)); gap: 16px; }
+  .cd-grabber { display: block; align-self: center; width: 40px; height: 5px; border-radius: 999px; background: var(--border-strong); }
+  .cd-close { display: none; }
+  .cd-spz { font-size: 18px; }
+  .cd-big { font-size: 30px; }
+  .cd-live-actions .primary-btn, .cd-live-actions .pill-btn { height: 48px; border-radius: 12px; }
+  .cd-live-actions .icon-btn { width: 48px; height: 48px; }
+  .cd-actions .primary-btn, .cd-actions .pill-btn { height: 48px; border-radius: 12px; }
+  .car-gps-row { min-height: 56px; }
+}
