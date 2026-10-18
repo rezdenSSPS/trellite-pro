@@ -1006,6 +1006,16 @@ function flattenDriveBooks(data) {
   });
   return out;
 }
+// Kdo auto řídil bereme ze šichtovnice (předávky, zdroj admin.foodis) podle SPZ
+// a data jízdy — monitoring řidiče u těchto aut neeviduje. Výpadek nevadí.
+async function monTripDriver(spz, datum) {
+  if (!intEnabled("smenovnik")) return "";
+  try {
+    const info = await upstream("smenovnik", `/vozidlo-ridic?spz=${encodeURIComponent(spzKey(spz))}&datum=${datum}`, { ttl: 5 * 60e3 });
+    const names = ((info && info.drivers) || []).map((d) => (d.name || d.shortName || "").trim()).filter(Boolean);
+    return [...new Set(names)].join(", ");
+  } catch (e) { return ""; }
+}
 let speedPollRunning = false;
 async function pollSpeeding() {
   if (!DOC || !monEnabled()) return;
@@ -1031,10 +1041,14 @@ async function pollSpeeding() {
         seen[trip.driveBookId] = now; changed = true;
         if (firstRun) continue; // výchozí stav – jen zapamatovat, neupozorňovat
         const when = new Date(trip.dateTimeStop || trip.dateTimeStart).toLocaleString("cs-CZ", { timeZone: "Europe/Prague", day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit" });
-        const place = (trip.stopDescription || trip.startDescription || "").replace(/;\s*/g, ", ");
+        // čas jízdy je už v pražském čase, datum = prvních 10 znaků (YYYY-MM-DD)
+        const driver = await monTripDriver(c.spz, String(trip.dateTimeStop || trip.dateTimeStart).slice(0, 10));
+        const clean = (s) => (s || "").replace(/;\s*/g, ", ");
+        const route = [clean(trip.startDescription), clean(trip.stopDescription)].filter(Boolean);
+        const where = route.length === 2 ? `${route[0]} → ${route[1]}` : (route[0] || "");
         admins.forEach((u) => notifyUser(u, "speed", {
           title: `Překročení rychlosti · ${c.spz}`,
-          body: `${Math.round(trip.maxSpeed)} km/h${when ? " · " + when : ""}${place ? " · " + place : ""}`,
+          body: `${Math.round(trip.maxSpeed)} km/h${driver ? " · řidič " + driver : ""}${when ? " · " + when : ""}${where ? "\n" + where : ""}`,
           url: "/", tag: "speed-" + trip.driveBookId,
         }));
       }
