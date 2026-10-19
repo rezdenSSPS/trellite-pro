@@ -669,6 +669,8 @@ a.pill-btn, a.primary-btn { text-decoration: none; }
 .person-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .person-name { font-weight: 600; font-size: 15px; }
 .person-sub { font-size: 13px; color: var(--muted); }
+.person-phone { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; color: var(--muted); }
+.person-phone svg { flex: none; opacity: .7; }
 .person-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
 .avatar.xl { width: 52px; height: 52px; font-size: 18px; box-shadow: none; }
 

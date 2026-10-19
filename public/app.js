@@ -619,9 +619,12 @@ function renderPeople(box, data) {
   if (data.errors.podpisy) intBanner(box, "warn", "Smlouvy a testy teď nejdou načíst – " + data.errors.podpisy);
   if (!data.people.length) { box.insertAdjacentHTML("beforeend", `<div class="int-empty">V tomhle městě zatím nikdo není.</div>`); return; }
   const cols = document.createElement("div"); cols.className = "people-cols";
+  // Nejnovější nahoře (podle data ve šichtovnici, jinak podle podpisu smlouvy)
+  const sinceTs = (p) => p.since || (p.contract && p.contract.signedAt) || "";
+  const byNewest = (a, b) => String(sinceTs(b)).localeCompare(String(sinceTs(a)));
   [
-    { key: "ridici", title: "Řidiči", sub: "OSVČ", people: data.people.filter(isDriverCol) },
-    { key: "brigadnici", title: "Brigádníci", sub: "DPP / DPČ", people: data.people.filter((p) => !isDriverCol(p)) },
+    { key: "ridici", title: "Řidiči", sub: "OSVČ", people: data.people.filter(isDriverCol).sort(byNewest) },
+    { key: "brigadnici", title: "Brigádníci", sub: "DPP / DPČ", people: data.people.filter((p) => !isDriverCol(p)).sort(byNewest) },
   ].forEach((g) => {
     const col = document.createElement("section"); col.className = "people-col " + g.key;
     col.innerHTML = `<h3 class="people-col-head"><span class="people-col-dot" aria-hidden="true"></span>${g.title}<span class="section-count">${g.people.length}</span><span class="muted-sm">${g.sub}</span></h3>`;
@@ -643,6 +646,7 @@ function personCardEl(p, links) {
   if (p.isActive === false) chips.push(`<span class="chip muted">Neaktivní</span>`);
   card.innerHTML = `<span class="avatar lg" style="background:${tint(color, 0.82)};color:${shade(color, 0.45)}">${escapeHtml(initials(p.name))}</span>
     <span class="person-main"><span class="person-name">${escapeHtml(p.name)}</span><span class="person-sub">${escapeHtml(personTypeLabel(p))}</span>
+    ${p.phone ? `<span class="person-phone">${icon("phone", 12)}${escapeHtml(p.phone)}</span>` : ""}
     <span class="person-chips">${chips.join("")}</span></span>`;
   card.onclick = () => openPerson(p, links);
   return card;
