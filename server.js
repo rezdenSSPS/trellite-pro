@@ -380,7 +380,7 @@ function noteComments(card, prevComments, actorId) {
 /* ============================================================
    PUSH UPOZORNĚNÍ (Web Push — iPhone od iOS 16.4 po přidání na plochu)
    ============================================================ */
-const NOTIFY_DEFAULTS = { assign: true, comment: true, due: true, fault: true, speed: true };
+const NOTIFY_DEFAULTS = { assign: true, comment: true, due: true, fault: true, speed: true, predavka: true };
 const notifyPrefs = (u) => Object.assign({}, NOTIFY_DEFAULTS, u.notify || {});
 const cardUrl = (id) => "/#card=" + id;
 let pushReady = false;
@@ -1188,6 +1188,60 @@ async function pollSpeeding() {
 }
 setInterval(() => { pollSpeeding().catch((e) => console.error("pollSpeeding", e)); }, SPEED_POLL_MS);
 setTimeout(() => { pollSpeeding().catch((e) => console.error("pollSpeeding", e)); }, 60e3); // první kontrola krátce po startu
+
+/* ------------------------------------------------------------
+   HLÍDAČ PŘEDÁVEK (pozdní příchody) — jednou denně po daném čase
+   (pražského času) se zeptá šichtovnice, kdo má dnes ranní nebo
+   celodenní směnu v předávkovém městě a do té doby neodeslal
+   předávku, a pošle push vybraným lidem (default: denis + miroslav).
+   Odpolední směny se neřeší. Každý kurýr jen jednou za den. Běží jen
+   při nastaveném propojení se šichtovnicí.
+   ------------------------------------------------------------ */
+const PREDAVKA_DEADLINE = (process.env.PREDAVKA_DEADLINE || "10:40").trim(); // HH:MM pražského času
+const PREDAVKA_ALERT_USERS = (process.env.PREDAVKA_ALERT_USERS || "denis,miroslav")
+  .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+const PREDAVKA_CITY_NAMES = { melnik: "Mělník", benesov: "Benešov", vlasim: "Vlašim" };
+const PREDAVKA_CHECK_MS = Number(process.env.PREDAVKA_CHECK_MS) || 60e3;
+// aktuální pražský den (YYYY-MM-DD) a minuty od půlnoci; řeší i letní čas
+function pragueDayMinutes(ms = Date.now()) {
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/Prague", year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hour12: false,
+  }).formatToParts(new Date(ms)).filter((x) => x.type !== "literal").map((x) => [x.type, x.value]));
+  return { date: `${p.year}-${p.month}-${p.day}`, minutes: (+p.hour % 24) * 60 + +p.minute };
+}
+let predavkaPollRunning = false;
+async function pollPredavky() {
+  if (!DOC || !intEnabled("smenovnik") || predavkaPollRunning) return;
+  const [dh, dm] = PREDAVKA_DEADLINE.split(":").map(Number);
+  const deadline = (Number.isFinite(dh) ? dh : 10) * 60 + (Number.isFinite(dm) ? dm : 40);
+  const { date, minutes } = pragueDayMinutes();
+  // jen v okně [deadline, deadline+3 h] — po delším výpadku serveru raději nehlásit pozdě večer
+  if (minutes < deadline || minutes > deadline + 180) return;
+  const pa = DOC.predavkaAlerts || (DOC.predavkaAlerts = {});
+  if (pa.date === date && pa.done) return; // dnešek už proběhl
+  const recipients = DOC.users.filter((u) => PREDAVKA_ALERT_USERS.includes((u.username || "").toLowerCase()));
+  predavkaPollRunning = true;
+  try {
+    let data;
+    try { data = await upstream("smenovnik", `/predavky-chybejici?datum=${date}`, { fresh: true }); }
+    catch (e) { return; } // služba nedostupná → zkusí se při dalším ticku
+    const missing = (data && data.missing) || [];
+    for (const m of missing) {
+      const cityName = PREDAVKA_CITY_NAMES[m.city] || m.city || "";
+      const shift = m.shift === "fullday" ? "celodenní" : "ranní";
+      recipients.forEach((u) => notifyUser(u, "predavka", {
+        title: `Pozdní příchod${cityName ? " · " + cityName : ""}`,
+        body: `${m.name} – ${shift} směna, nevyplněná předávka do ${PREDAVKA_DEADLINE}`,
+        url: "/", tag: `predavka-${date}-${m.courierId}`,
+      }));
+    }
+    DOC.predavkaAlerts = { date, done: true, count: missing.length, at: Date.now() };
+    persist();
+  } finally { predavkaPollRunning = false; }
+}
+setInterval(() => { pollPredavky().catch((e) => console.error("pollPredavky", e)); }, PREDAVKA_CHECK_MS);
+setTimeout(() => { pollPredavky().catch((e) => console.error("pollPredavky", e)); }, 20e3);
 
 // PDF smlouvy — jen pro toho, kdo smí vidět lidi aspoň v jednom městě ze smlouvy
 app.get("/api/integrace/smlouva/:id", requireAuth, async (req, res) => {

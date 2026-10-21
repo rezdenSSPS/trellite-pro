@@ -90,6 +90,22 @@ stav (staré jízdy nehlásí). Běží jen při nastaveném `MONITORING_*`.
 | `SPEED_LIMIT` | Trello | práh v km/h (výchozí `150`) |
 | `SPEED_POLL_MS` | Trello | perioda kontroly v ms (výchozí `3600000` = 1 h) |
 
+### Hlídač předávek (pozdní příchody)
+
+Jednou denně po daném čase (pražského času) se Trello zeptá šichtovnice, kdo má
+ten den **ranní nebo celodenní** směnu v předávkovém městě a do té doby
+neodeslal denní předávku auta. Na každého takového kurýra pošle push upozornění
+„Pozdní příchod" vybraným lidem (výchozí `denis,miroslav`). Odpolední směny se
+neřeší, každý kurýr se hlásí jen jednou za den. Běží jen při nastaveném
+propojení na šichtovnici (`SMENOVNIK_*`); šichtovnice k tomu vystavuje
+`GET /api/integrace/predavky-chybejici`.
+
+| Proměnná | Kde | Hodnota |
+|---|---|---|
+| `PREDAVKA_DEADLINE` | Trello | čas uzávěrky `HH:MM` pražského času (výchozí `10:40`) |
+| `PREDAVKA_ALERT_USERS` | Trello | uživatelská jména příjemců oddělená čárkou (výchozí `denis,miroslav`) |
+| `PREDAVKA_CHECK_MS` | Trello | perioda kontroly v ms (výchozí `60000` = 1 min) |
+
 ## API
 
 | Metoda | Cesta         | Popis                              |
