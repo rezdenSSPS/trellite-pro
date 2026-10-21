@@ -92,6 +92,7 @@ function applyPayload(j) {
 async function mutate(method, path, body) { applyPayload(await api(method, path, body)); }
 
 function rerender() {
+  if (viewMode === "inventory") return renderInventory();
   if (viewMode === "admin") return renderAdmin();
   if (viewMode === "board") {
     if (!getBoard()) return showBoards();
@@ -230,6 +231,7 @@ function renderSidebar() {
   el("navBoards").classList.toggle("active", viewMode === "boards");
   el("navTasks").classList.toggle("active", viewMode === "board" && isMyTasks());
   el("navAdmin").classList.toggle("active", viewMode === "admin");
+  el("navInventory").classList.toggle("active", viewMode === "inventory");
   updateMobileNav();
 }
 
@@ -272,7 +274,7 @@ function renderBoardMembers(b) {
 
 function showBoards() {
   viewMode = "boards"; currentBoardId = null; hideIntegration();
-  el("boardsView").hidden = false; el("boardView").hidden = true; el("adminView").hidden = true;
+  el("boardsView").hidden = false; el("boardView").hidden = true; el("adminView").hidden = true; el("inventoryView").hidden = true;
   el("boardTitle").textContent = ""; el("boardTitle").setAttribute("contenteditable", "false");
   el("boardStar").hidden = true; el("searchWrap").hidden = true; el("searchInput").value = "";
   el("filterBtn").hidden = true; el("menuBtn").hidden = true; el("newCardBtn").hidden = true; el("boardMembers").hidden = true;
@@ -282,7 +284,7 @@ function showBoards() {
 function openBoard(id) {
   const b = state.boards.find((x) => x.id === id); if (!b) return showBoards();
   viewMode = "board"; currentBoardId = id; filter = { labels: [], members: [], due: null };
-  el("boardsView").hidden = true; el("boardView").hidden = false; el("adminView").hidden = true;
+  el("boardsView").hidden = true; el("boardView").hidden = false; el("adminView").hidden = true; el("inventoryView").hidden = true;
   setHeader({ crumb: b.virtual ? "Pracovní prostor" : "Pracovní prostor / Nástěnky", board: true });
   el("boardTitle").textContent = b.title;
   el("boardTitle").setAttribute("contenteditable", (isAdmin() && !b.virtual) ? "true" : "false");
@@ -507,6 +509,7 @@ const CONTRACT_LABEL = { dpp: "DPP", dpc: "DPČ", dpp_dpc: "DPP + DPČ", osvc: "
 const czk = (n) => new Intl.NumberFormat("cs-CZ", { style: "currency", currency: "CZK", maximumFractionDigits: 0 }).format(Number(n) || 0);
 const num = (n) => new Intl.NumberFormat("cs-CZ", { maximumFractionDigits: 1 }).format(Number(n) || 0);
 const fmtDate = (v) => v ? new Date(v).toLocaleDateString("cs-CZ", { day: "numeric", month: "numeric", year: "numeric" }) : "";
+const fmtDateTime = (v) => v ? new Date(v).toLocaleString("cs-CZ", { day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
 const colorFor = (s) => LABEL_COLORS[[...String(s)].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7) % LABEL_COLORS.length];
 
 function hideIntegration() { closeCarDetail(); el("boardTabs").hidden = true; el("intView").hidden = true; el("listChips").hidden = true; closePerson(); }
@@ -643,6 +646,7 @@ function personCardEl(p, links) {
   if (p.clothing && !isPending(p)) chips.push(p.clothing.signedAt ? `<span class="chip ok">Oblečení převzato</span>` : `<span class="chip warn">Oblečení nepřevzato</span>`);
   if (p.test) chips.push(`<span class="chip ${testClass(p.test.percent)}">Test ${p.test.percent} %${p.test.percent < TEST_PASS ? " · Neprošel" : ""}</span>`);
   if (p.clothingSize) chips.push(`<span class="chip">Vel. ${escapeHtml(p.clothingSize)}</span>`);
+  if (p.inventory && p.inventory.total) chips.push(`<span class="chip">Má ${p.inventory.total} ks oblečení</span>`);
   if (p.isActive === false) chips.push(`<span class="chip muted">Neaktivní</span>`);
   card.innerHTML = `<span class="avatar lg" style="background:${tint(color, 0.82)};color:${shade(color, 0.45)}">${escapeHtml(initials(p.name))}</span>
     <span class="person-main"><span class="person-name">${escapeHtml(p.name)}</span><span class="person-sub">${escapeHtml(personTypeLabel(p))}</span>
@@ -677,6 +681,9 @@ function openPerson(p, links) {
   const clothing = p.clothing ? field("Dostane", escapeHtml(p.clothing.items.map((i) => `${i.count}× ${i.label}`).join(", ")))
     + field("Velikost", escapeHtml(p.clothing.size || "—"))
     + field("Převzetí", p.clothing.signedAt ? "Potvrzeno podpisem " + escapeHtml(fmtDate(p.clothing.signedAt)) : (isPending(p) ? "Až po podpisu smluv" : "Kurýr ještě nepotvrdil")) : "";
+  const owns = p.inventory && (p.inventory.items || []).length
+    ? p.inventory.items.map((i) => field(escapeHtml(i.label), escapeHtml(i.count + "× vel. " + i.size))).join("") + field("Celkem", escapeHtml(p.inventory.total + " ks"))
+    : "";
 
   let test = "";
   if (p.test) {
@@ -700,7 +707,7 @@ function openPerson(p, links) {
     ${p.phone || p.email ? `<div class="person-quick">${p.phone ? `<a class="pq main" href="tel:${escapeHtml(p.phone.replace(/\s+/g, ""))}">${icon("phone", 20)}<span>Zavolat</span></a><a class="pq" href="sms:${escapeHtml(p.phone.replace(/\s+/g, ""))}">${icon("message", 20)}<span>SMS</span></a>` : ""}${p.email ? `<a class="pq" href="mailto:${escapeHtml(p.email)}">${icon("mail", 20)}<span>E-mail</span></a>` : ""}</div>` : ""}
     <div class="person-grid">
       <div>${sec("Kontakt", contact)}${sec("Práce", work)}${sec("Fakturace a platby", billing)}</div>
-      <div>${sec("Smlouva", contract)}${sec("Pracovní oblečení", clothing)}${sec("Vstupní test", test)}</div>
+      <div>${sec("Smlouva", contract)}${sec("Pracovní oblečení", clothing)}${sec("Oblečení (co má)", owns)}${sec("Vstupní test", test)}</div>
     </div>
     ${linkBtns.length ? `<div class="person-links">${linkBtns.join("")}</div>` : ""}`;
   bindCopyButtons(body);
@@ -1577,7 +1584,132 @@ function renderFilterDrawer(bodyEl, titleEl, board) {
 /* ============================================================
    Správa uživatelů (admin)
    ============================================================ */
-function showAdmin() { if (!isAdmin()) return; viewMode = "admin"; hideIntegration(); el("boardsView").hidden = true; el("boardView").hidden = true; el("adminView").hidden = false;
+/* ============================================================
+   Inventura — sklad pracovního oblečení
+   ============================================================ */
+function showInventory() {
+  viewMode = "inventory"; hideIntegration();
+  el("boardsView").hidden = true; el("boardView").hidden = true; el("adminView").hidden = true; el("inventoryView").hidden = false;
+  el("boardTitle").textContent = ""; el("boardStar").hidden = true; el("searchWrap").hidden = true;
+  el("filterBtn").hidden = true; el("menuBtn").hidden = true; el("newCardBtn").hidden = true; el("boardMembers").hidden = true;
+  setHeader({ crumb: "Pracovní prostor", title: "Inventura" });
+  renderInventory(); renderSidebar();
+}
+function invItemLabel(inv, id) { const it = (inv.items || []).find((x) => x.id === id); return it ? it.label : id; }
+function invLine(inv, items) {
+  return items.map((i) => `${i.count}× ${escapeHtml(invItemLabel(inv, i.item))} ${escapeHtml(i.size)}`).join(", ");
+}
+function renderInventory() {
+  const box = el("inventoryView"); if (!box) return;
+  const inv = (state && state.inventory) || { items: [], sizes: [], stock: {}, people: [], ledger: [] };
+  const admin = isAdmin();
+  const sizes = inv.sizes || [];
+  const stockEmpty = !Object.values(inv.stock || {}).some((n) => n !== 0);
+
+  const stockRows = (inv.items || []).map((it) => {
+    const cells = sizes.map((s) => {
+      const n = (inv.stock || {})[it.id + "|" + s] || 0;
+      const cls = n < 0 ? "neg" : n > 0 ? "pos" : "zero";
+      return `<td class="inv-cell ${cls}">${n}</td>`;
+    }).join("");
+    return `<tr><th class="inv-row-h">${escapeHtml(it.label)}</th>${cells}</tr>`;
+  }).join("");
+
+  const people = inv.people || [];
+  const peopleHtml = people.length ? people.map((p) => `
+    <div class="inv-person">
+      <span class="avatar sm" style="background:${tint(colorFor(p.name), 0.82)};color:${shade(colorFor(p.name), 0.45)}">${escapeHtml(initials(p.name))}</span>
+      <span class="inv-person-main"><span class="inv-person-name">${escapeHtml(p.name)}</span>
+      <span class="inv-person-items">${escapeHtml(invLine(inv, p.items))}</span></span>
+    </div>`).join("") : `<div class="int-empty small">Zatím nikdo nemá zapsané oblečení.</div>`;
+
+  const ledger = inv.ledger || [];
+  const ledgerHtml = ledger.length ? ledger.slice(0, 40).map((m) => {
+    const kind = m.source === "init" ? "úvodní stav" : m.source === "podpisy" ? "podpis dohody" : (m.dir === "in" ? "příjem" : "výdej");
+    const dirCls = m.dir === "in" ? "in" : "out";
+    const who = m.personName ? ` · ${escapeHtml(m.personName)}` : "";
+    const note = m.note ? ` · ${escapeHtml(m.note)}` : "";
+    const del = admin ? `<button class="inv-del" data-del="${m.id}" title="Smazat pohyb">${icon("trash", 14)}</button>` : "";
+    return `<div class="inv-mv">
+      <span class="inv-mv-dir ${dirCls}">${m.dir === "in" ? "+" : "−"}${m.qty}</span>
+      <span class="inv-mv-main"><b>${escapeHtml(invItemLabel(inv, m.item))} ${escapeHtml(m.size)}</b> <span class="inv-mv-kind">${kind}</span>${who}${note}</span>
+      <span class="inv-mv-time">${escapeHtml(fmtDateTime(m.ts))}</span>${del}
+    </div>`;
+  }).join("") : `<div class="int-empty small">Zatím žádné pohyby.</div>`;
+
+  const adminForm = admin ? `
+    <form class="inv-form" autocomplete="off">
+      <select name="dir">
+        <option value="out">Výdej člověku</option>
+        <option value="in">Příjem na sklad</option>
+      </select>
+      <select name="item">${(inv.items || []).map((i) => `<option value="${i.id}">${escapeHtml(i.label)}</option>`).join("")}</select>
+      <select name="size">${sizes.map((s) => `<option value="${s}">${s}</option>`).join("")}</select>
+      <input name="qty" type="number" min="1" max="999" value="1" inputmode="numeric" aria-label="Počet kusů">
+      <input name="personName" placeholder="Jméno člověka (u výdeje)" aria-label="Jméno člověka">
+      <input name="note" placeholder="Poznámka (nepovinné)" aria-label="Poznámka">
+      <button type="submit" class="primary-btn sm">Zapsat</button>
+    </form>` : "";
+
+  const importHtml = admin ? `
+    <details class="inv-import">
+      <summary>Import úvodního stavu z CSV (Google Forms)</summary>
+      <p class="muted-sm">Vlož obsah CSV (co kdo už má). Nahradí předchozí úvodní import. Do skladu se nezapočítá — jen k lidem.</p>
+      <textarea class="inv-csv" rows="5" placeholder="Timestamp,Jméno,Příjmení,Pobočka,Kolik kusů máš? [Trička],…"></textarea>
+      <button type="button" class="pop-btn" id="invImportBtn">Importovat CSV</button>
+    </details>` : "";
+
+  box.innerHTML = `
+    <div class="inv-wrap">
+      <section class="inv-sec">
+        <div class="inv-head"><h3>Sklad</h3></div>
+        ${adminForm}
+        <div class="inv-stock-wrap"><table class="inv-stock">
+          <thead><tr><th></th>${sizes.map((s) => `<th>${s}</th>`).join("")}</tr></thead>
+          <tbody>${stockRows}</tbody>
+        </table></div>
+        ${stockEmpty ? `<p class="inv-note muted-sm">Sklad je zatím prázdný. Zadej příjem (nákup), nebo sklad zatím neřeš — přehled „kdo co má" funguje i bez něj.</p>` : ""}
+        ${importHtml}
+      </section>
+      <section class="inv-sec">
+        <h3>Kdo co má <span class="section-count">${people.length}</span></h3>
+        <div class="inv-people">${peopleHtml}</div>
+      </section>
+      <section class="inv-sec">
+        <h3>Poslední pohyby</h3>
+        <div class="inv-ledger">${ledgerHtml}</div>
+      </section>
+    </div>`;
+
+  const form = box.querySelector(".inv-form");
+  if (form) {
+    const dir = form.querySelector("[name=dir]"), pn = form.querySelector("[name=personName]");
+    const syncDir = () => { pn.placeholder = dir.value === "out" ? "Jméno člověka (povinné)" : "Jméno (jen u vrácení)"; };
+    dir.onchange = syncDir; syncDir();
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const body = { dir: dir.value, item: form.querySelector("[name=item]").value, size: form.querySelector("[name=size]").value,
+        qty: form.querySelector("[name=qty]").value, personName: pn.value.trim(), note: form.querySelector("[name=note]").value.trim() };
+      try { applyPayload(await api("POST", "/inventory/move", body)); toast(body.dir === "out" ? "Výdej zapsán." : "Příjem zapsán."); }
+      catch (err) { toast(errMsg(err && err.error) || "Nepodařilo se zapsat pohyb."); }
+    };
+  }
+  box.querySelectorAll("[data-del]").forEach((b) => b.onclick = async () => {
+    if (!confirm("Smazat tento pohyb?")) return;
+    try { applyPayload(await api("DELETE", "/inventory/move/" + b.dataset.del)); } catch (e) { toast("Nepodařilo se smazat."); }
+  });
+  const imp = box.querySelector("#invImportBtn");
+  if (imp) imp.onclick = async () => {
+    const ta = box.querySelector(".inv-csv"); const csv = (ta.value || "").trim();
+    if (!csv) { toast("Vlož nejdřív obsah CSV."); return; }
+    imp.disabled = true;
+    try { const j = await api("POST", "/inventory/import", { csv }); applyPayload(j); const r = j.imported || {}; toast(`Naimportováno: ${r.people || 0} lidí, ${r.pieces || 0} kusů${r.skipped ? ", " + r.skipped + " bez velikosti přeskočeno" : ""}.`); }
+    catch (e) { toast(errMsg(e && e.error) || "Import selhal."); }
+    finally { imp.disabled = false; }
+  };
+}
+
+function showAdmin() { if (!isAdmin()) return; viewMode = "admin"; hideIntegration(); el("boardsView").hidden = true; el("boardView").hidden = true; el("inventoryView").hidden = true; el("adminView").hidden = false;
   el("boardTitle").textContent = ""; el("boardStar").hidden = true; el("searchWrap").hidden = true; el("filterBtn").hidden = true; el("menuBtn").hidden = true;
   el("newCardBtn").hidden = true; el("boardMembers").hidden = true;
   setHeader({ crumb: "Pracovní prostor", title: "Správa uživatelů" }); renderAdmin(); renderSidebar(); }
@@ -1656,6 +1788,7 @@ el("tasksBtn").onclick = openMyTasks;
 el("navBoards").onclick = () => { closeDrawer(); showBoards(); };
 el("navTasks").onclick = openMyTasks;
 el("navAdmin").onclick = showAdmin;
+el("navInventory").onclick = () => { closeDrawer(); showInventory(); };
 el("newBoardBtn").onclick = createBoard;
 el("newCardBtn").onclick = () => { const w = document.querySelector(".list:not(.collapsed)"); if (!w) return toast("Nejdřív vytvořte seznam.");
   const list = findList(w.dataset.listId); const btn = w.querySelector(".add-card-btn"); if (list && btn) { w.scrollIntoView({ inline: "start", behavior: "smooth" }); openCardComposer(w, list, btn); } };

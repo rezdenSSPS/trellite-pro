@@ -65,6 +65,7 @@ async function loadDoc() {
   if (!d.meta) d.meta = {};
   if (!d.meta.jwtSecret) { d.meta.jwtSecret = crypto.randomBytes(32).toString("hex"); await storage.set(d); }
   if (!d.meta.vapid && !process.env.VAPID_PUBLIC_KEY) { d.meta.vapid = webpush.generateVAPIDKeys(); await storage.set(d); }
+  if (!d.inventory || !Array.isArray(d.inventory.ledger)) d.inventory = { ledger: [], applied: {} };
   DOC = d;
   setupPush();
 }
@@ -224,12 +225,136 @@ function filterStateFor(u) {
   const validNew = (u.newTaskIds || []).filter((id) => { const f = findCard(id); return f && f.card.memberIds.includes(u.id) && !f.card.archived; });
   const me = { id: u.id, username: u.username, name: u.name, role: u.role, color: u.color, theme: u.theme || "light", access: u.access, newTaskCount: validNew.length, newTaskIds: validNew,
     notify: notifyPrefs(u), pushDevices: (u.pushSubs || []).map((s) => s.endpoint) };
-  const out = { me, state: { activeMemberId: u.id, theme: u.theme || "light", members, boards } };
+  const out = { me, state: { activeMemberId: u.id, theme: u.theme || "light", members, boards, inventory: inventoryState() } };
   if (isAdmin(u)) {
     out.users = DOC.users.map(sanitizeUser);
     out.allBoards = DOC.boards.filter((b) => !b.archived).map((b) => ({ id: b.id, title: b.title, lists: b.lists.filter((l) => !l.archived).map((l) => ({ id: l.id, title: l.title })) }));
   }
   return out;
+}
+
+/* ============================================================
+   INVENTURA — sklad pracovního oblečení (jeden společný).
+   Zdroj pravdy je tady v Trellu: kniha pohybů (ledger). Stav skladu
+   se počítá z pohybů — počítané příjmy (+) minus počítané výdeje (−).
+   Pohyb „init" z úvodního importu (co kdo už má) se započítá u osoby,
+   ale do skladu NE (sklad se rozjede až se zadanými nákupy). Výdej při
+   podpisu dohody v Podpisech (fáze 2) se zapíše jako počítaný výdej.
+   ============================================================ */
+const INV_ITEMS = [
+  { id: "tricko", label: "Tričko" },
+  { id: "mikina", label: "Mikina" },
+  { id: "vesta", label: "Vesta" },
+  { id: "bunda", label: "Bunda" },
+];
+const INV_SIZES = ["XS", "S", "M", "L", "XL", "XXL", "3XL"];
+const invItem = (id) => INV_ITEMS.find((i) => i.id === id) || null;
+const invKey = (item, size) => item + "|" + size;
+
+// Jeden průchod knihou pohybů → stav skladu a držení u osob.
+// dir "out" = výdej osobě (ze skladu ubyde, osobě přibyde).
+// dir "in"  = příjem na sklad / vrácení (na sklad přibyde, osobě ubyde).
+function inventorySummary() {
+  const inv = DOC.inventory || { ledger: [] };
+  const stock = {};               // "tricko|L" → kusů na skladě
+  const peopleMap = new Map();    // personKey → { key, name, held:{ "tricko|L": n } }
+  for (const m of inv.ledger || []) {
+    const k = invKey(m.item, m.size);
+    const q = Number(m.qty) || 0;
+    const stockSign = m.dir === "in" ? 1 : -1;
+    if (m.counted) stock[k] = (stock[k] || 0) + stockSign * q;
+    if (m.personKey) {
+      let p = peopleMap.get(m.personKey);
+      if (!p) { p = { key: m.personKey, name: m.personName || "", held: {} }; peopleMap.set(m.personKey, p); }
+      p.held[k] = (p.held[k] || 0) - stockSign * q; // výdej (out) osobě přidá, příjem/vrácení (in) ubere
+      if (m.personName) p.name = m.personName;
+    }
+  }
+  return { stock, peopleMap };
+}
+
+// Co drží konkrétní osoba (podle klíče jména) — { items:[{item,label,size,count}], total } nebo null.
+function inventoryForPerson(personKey, sum) {
+  if (!personKey) return null;
+  const { peopleMap } = sum || inventorySummary();
+  const p = peopleMap.get(personKey);
+  if (!p) return null;
+  const items = [];
+  for (const [k, n] of Object.entries(p.held)) {
+    if (n <= 0) continue;
+    const [item, size] = k.split("|");
+    items.push({ item, label: (invItem(item) || {}).label || item, size, count: n });
+  }
+  if (!items.length) return null;
+  items.sort((a, b) => INV_ITEMS.findIndex((i) => i.id === a.item) - INV_ITEMS.findIndex((i) => i.id === b.item) || INV_SIZES.indexOf(a.size) - INV_SIZES.indexOf(b.size));
+  return { items, total: items.reduce((s, i) => s + i.count, 0) };
+}
+
+// Stav pro klienta: definice, tabulka skladu, lidé s držením a posledních pár pohybů.
+function inventoryState() {
+  const { stock, peopleMap } = inventorySummary();
+  const people = [...peopleMap.values()].map((p) => ({
+    key: p.key, name: p.name,
+    items: Object.entries(p.held).filter(([, n]) => n > 0).map(([k, n]) => { const [item, size] = k.split("|"); return { item, size, count: n }; })
+      .sort((a, b) => INV_ITEMS.findIndex((i) => i.id === a.item) - INV_ITEMS.findIndex((i) => i.id === b.item) || INV_SIZES.indexOf(a.size) - INV_SIZES.indexOf(b.size)),
+  })).filter((p) => p.items.length).sort((a, b) => a.name.localeCompare(b.name, "cs"));
+  return {
+    items: INV_ITEMS, sizes: INV_SIZES, stock, people,
+    ledger: (DOC.inventory.ledger || []).slice(-300).reverse(),
+  };
+}
+
+// Mapování názvu v hranaté závorce hlavičky CSV → id položky.
+const INV_CSV_GARMENT = { "trička": "tricko", "tricka": "tricko", "mikiny": "mikina", "vesty": "vesta", "bundy": "bunda" };
+
+// Rozparsuje CSV (Google Forms export) do řádků
+// { name, pobocka, tricko:{count,size}, mikina:{...}, vesta:{...}, bunda:{...} }.
+function parseInventoryCsv(text) {
+  const table = parseCsvTable(String(text).replace(/^﻿/, ""));
+  if (!table.length) return [];
+  const header = table[0].map((h) => String(h).trim());
+  const bracket = (h) => { const m = h.match(/\[([^\]]+)\]/); return m ? m[1].trim().toLowerCase() : null; };
+  const col = {};
+  header.forEach((h, i) => {
+    const low = h.toLowerCase();
+    if (low === "jméno" || low === "jmeno") col.first = i;
+    else if (low === "příjmení" || low === "prijmeni") col.last = i;
+    else if (low === "pobočka" || low === "pobocka") col.pobocka = i;
+    else if (low.startsWith("kolik")) { const g = INV_CSV_GARMENT[bracket(h)]; if (g) (col.count ||= {})[g] = i; }
+    else if (low.startsWith("jakou") || low.includes("velikost")) { const g = INV_CSV_GARMENT[bracket(h)]; if (g) (col.size ||= {})[g] = i; }
+  });
+  const num = (v) => { const s = String(v || "").trim(); if (/^\d+\s*\+?$/.test(s)) return parseInt(s, 10); return parseInt(s, 10) || 0; };
+  const rows = [];
+  for (let r = 1; r < table.length; r++) {
+    const rec = table[r]; if (!rec || !rec.length) continue;
+    const first = (rec[col.first] || "").trim(), last = (rec[col.last] || "").trim();
+    const name = (first + " " + last).trim();
+    if (!name) continue;
+    const row = { name, pobocka: (rec[col.pobocka] || "").trim() };
+    for (const it of INV_ITEMS) {
+      const ci = col.count && col.count[it.id], si = col.size && col.size[it.id];
+      row[it.id] = { count: ci != null ? num(rec[ci]) : 0, size: si != null ? String(rec[si] || "").trim() : "" };
+    }
+    rows.push(row);
+  }
+  return rows;
+}
+
+// Minimalistický CSV parser (uvozovky, zdvojené uvozovky, CRLF).
+function parseCsvTable(text) {
+  const rows = []; let row = [], field = "", q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) {
+      if (c === '"') { if (text[i + 1] === '"') { field += '"'; i++; } else q = false; }
+      else field += c;
+    } else if (c === '"') q = true;
+    else if (c === ",") { row.push(field); field = ""; }
+    else if (c === "\n" || c === "\r") { if (c === "\r" && text[i + 1] === "\n") i++; row.push(field); field = ""; if (row.some((x) => x !== "")) rows.push(row); row = []; }
+    else field += c;
+  }
+  if (field !== "" || row.length) { row.push(field); if (row.some((x) => x !== "")) rows.push(row); }
+  return rows;
 }
 
 /* přiřazení → upozornění */
@@ -695,6 +820,8 @@ app.get("/api/integrace/board/:boardId/lide", requireAuth, async (req, res) => {
     delete p.records;
   });
   people.sort((a, b) => (b.isActive ? 1 : 0) - (a.isActive ? 1 : 0) || a.name.localeCompare(b.name, "cs"));
+  const invSum = inventorySummary();
+  people.forEach((p) => { p.inventory = inventoryForPerson(nameKey(p.name), invSum); });
   res.json({
     people, links: intLinks(),
     errors: { smenovnik: kur.status === "rejected" ? upstreamError(kur.reason) : null, podpisy: sml.status === "rejected" ? upstreamError(sml.reason) : null },
@@ -1078,6 +1205,66 @@ app.get("/api/integrace/smlouva/:id", requireAuth, async (req, res) => {
     const cd = r.headers.get("content-disposition"); if (cd) res.setHeader("Content-Disposition", cd);
     res.send(Buffer.from(await r.arrayBuffer()));
   } catch (e) { res.status(502).json({ error: "upstream", message: upstreamError(e) }); }
+});
+
+/* ---------------- INVENTURA (sklad oblečení) ---------------- */
+
+// Ruční pohyb: výdej osobě (dir "out") nebo příjem na sklad / vrácení (dir "in").
+app.post("/api/inventory/move", requireAuth, requireAdmin, (req, res) => {
+  const b = req.body || {};
+  const item = String(b.item || "");
+  const size = String(b.size || "").toUpperCase();
+  const dir = b.dir === "in" ? "in" : "out";
+  const qty = Math.max(1, Math.min(999, parseInt(b.qty, 10) || 0));
+  if (!invItem(item)) return res.status(400).json({ error: "Neznámá položka." });
+  if (!INV_SIZES.includes(size)) return res.status(400).json({ error: "Neznámá velikost." });
+  const personName = String(b.personName || "").trim();
+  if (dir === "out" && !personName) return res.status(400).json({ error: "U výdeje zadej jméno člověka." });
+  DOC.inventory.ledger.push({
+    id: uid(), ts: Date.now(), item, size, qty, dir, counted: true,
+    personKey: personName ? nameKey(personName) : null, personName: personName || null,
+    source: "manual", note: String(b.note || "").slice(0, 200) || null, by: req.user.id,
+  });
+  respond(req, res);
+});
+
+// Smazání jednoho pohybu (oprava chyby).
+app.delete("/api/inventory/move/:id", requireAuth, requireAdmin, (req, res) => {
+  const before = DOC.inventory.ledger.length;
+  DOC.inventory.ledger = DOC.inventory.ledger.filter((m) => m.id !== req.params.id);
+  if (DOC.inventory.ledger.length === before) return res.status(404).json({ error: "not_found" });
+  respond(req, res);
+});
+
+// Import úvodního stavu „co kdo už má" z CSV (Google Forms). Nahrazuje předchozí
+// import (source "init"), takže jde kdykoli zopakovat novým exportem.
+app.post("/api/inventory/import", requireAuth, requireAdmin, (req, res) => {
+  let rows = Array.isArray(req.body?.rows) ? req.body.rows : null;
+  if (!rows && typeof req.body?.csv === "string") { try { rows = parseInventoryCsv(req.body.csv); } catch (e) { return res.status(400).json({ error: "Nepodařilo se načíst CSV." }); } }
+  if (!rows) return res.status(400).json({ error: "Chybí data (rows nebo csv)." });
+  DOC.inventory.ledger = DOC.inventory.ledger.filter((m) => m.source !== "init");
+  let people = 0, pieces = 0, skipped = 0;
+  for (const r of rows) {
+    const name = String(r.name || "").trim();
+    if (!name) continue;
+    const key = nameKey(name);
+    let any = false;
+    for (const it of INV_ITEMS) {
+      const cell = r[it.id] || {};
+      const count = Math.max(0, Math.min(99, parseInt(cell.count, 10) || 0));
+      if (!count) continue;
+      const size = String(cell.size || "").toUpperCase().trim();
+      if (!INV_SIZES.includes(size)) { skipped += count; continue; } // má kusy, ale bez velikosti → nelze zařadit
+      DOC.inventory.ledger.push({
+        id: uid(), ts: Date.now(), item: it.id, size, qty: count, dir: "out", counted: false,
+        personKey: key, personName: name, source: "init", note: r.pobocka ? ("Pobočka: " + r.pobocka) : null,
+      });
+      pieces += count; any = true;
+    }
+    if (any) people++;
+  }
+  broadcast(req.header("x-client-id")); persist();
+  res.json(Object.assign({ imported: { people, pieces, skipped } }, filterStateFor(req.user)));
 });
 
 app.get("/api/health", (req, res) => res.json({ ok: true }));

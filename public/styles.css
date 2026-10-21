@@ -559,6 +559,47 @@ button, input, textarea, select { font-family: inherit; }
 .admin-view { padding: 32px 28px 72px; }
 .admin-view > * { max-width: 920px; margin-left: auto; margin-right: auto; }
 #addUserBtn { display: flex; margin-top: 16px; }
+
+/* Inventura */
+.inventory-view { padding: 32px 28px 72px; overflow: auto; }
+.inv-wrap { max-width: 980px; margin: 0 auto; display: flex; flex-direction: column; gap: 28px; }
+.inv-sec { background: var(--card-bg); border: 1px solid var(--border); border-radius: 14px; padding: 18px 20px; }
+.inv-sec > h3, .inv-head h3 { margin: 0 0 14px; font-size: 15px; font-weight: 650; display: flex; align-items: center; gap: 8px; }
+.inv-sec .section-count { font-size: 12px; font-weight: 600; color: var(--muted); background: var(--subtle); border-radius: 999px; padding: 1px 8px; }
+.inv-form { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; align-items: center; }
+.inv-form select, .inv-form input { height: 36px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--bg); color: var(--text); padding: 0 10px; font-size: 14px; }
+.inv-form input[name=qty] { width: 72px; }
+.inv-form input[name=personName] { min-width: 180px; flex: 1 1 180px; }
+.inv-form input[name=note] { min-width: 160px; flex: 1 1 160px; }
+.primary-btn.sm { height: 36px; padding: 0 14px; font-size: 14px; }
+.inv-stock-wrap { overflow-x: auto; }
+.inv-stock { border-collapse: collapse; width: 100%; font-size: 14px; }
+.inv-stock th, .inv-stock td { padding: 8px 10px; text-align: center; border-bottom: 1px solid var(--border); }
+.inv-stock thead th { color: var(--muted); font-weight: 600; font-size: 12px; }
+.inv-stock .inv-row-h { text-align: left; font-weight: 600; }
+.inv-cell.zero { color: var(--muted); }
+.inv-cell.pos { font-weight: 650; }
+.inv-cell.neg { color: #c15f5b; font-weight: 650; }
+.inv-note { margin: 12px 0 0; }
+.inv-import { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 14px; }
+.inv-import summary { cursor: pointer; font-weight: 600; font-size: 14px; }
+.inv-import .inv-csv { width: 100%; margin: 10px 0; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--bg); color: var(--text); padding: 8px 10px; font-family: ui-monospace, monospace; font-size: 12px; resize: vertical; }
+.inv-people { display: flex; flex-direction: column; gap: 10px; }
+.inv-person { display: flex; align-items: center; gap: 10px; }
+.inv-person-main { display: flex; flex-direction: column; min-width: 0; }
+.inv-person-name { font-weight: 600; font-size: 14px; }
+.inv-person-items { font-size: 13px; color: var(--muted); }
+.inv-ledger { display: flex; flex-direction: column; }
+.inv-mv { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+.inv-mv:last-child { border-bottom: none; }
+.inv-mv-dir { flex: 0 0 auto; min-width: 34px; text-align: center; font-weight: 700; border-radius: 6px; padding: 2px 6px; }
+.inv-mv-dir.out { color: #c15f5b; background: rgba(193,95,91,0.1); }
+.inv-mv-dir.in { color: #5a9e6f; background: rgba(90,158,111,0.12); }
+.inv-mv-main { flex: 1 1 auto; min-width: 0; }
+.inv-mv-kind { color: var(--muted); }
+.inv-mv-time { color: var(--muted); white-space: nowrap; }
+.inv-del { background: none; border: none; cursor: pointer; color: var(--muted); display: inline-flex; padding: 4px; border-radius: 6px; }
+.inv-del:hover { color: #c15f5b; background: var(--hover); }
 .admin-title { color: var(--text); font-size: 28px; font-weight: 650; letter-spacing: -0.02em; margin: 0 0 24px; }
 .admin-user { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 18px 20px; margin-bottom: 12px; }
 .admin-user-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
@@ -608,7 +649,7 @@ button, input, textarea, select { font-family: inherit; }
   .modal-side { flex-direction: row; flex-wrap: wrap; border-left: 0; border-top: 1px solid var(--border); padding: 16px; }
   .modal-side .side-btn { width: auto; flex: 1 1 44%; }
   .modal-side .side-title { width: 100%; margin-top: 8px; }
-  .boards-view, .admin-view { padding: 24px 16px 60px; }
+  .boards-view, .admin-view, .inventory-view { padding: 24px 16px 60px; }
   .board-view { padding: 16px; }
   .welcome-title { font-size: 24px; }
   .login-main { padding: 24px 16px; }
