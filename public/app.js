@@ -57,7 +57,7 @@ let currentBoardId = null, activeRef = null, viewMode = "boards";
 let filter = { labels: [], members: [], due: null };
 let dragListId = null;
 // Záložky městské nástěnky: "ukoly" = kanban, ostatní = data ze šichtovnice a podpisů
-let boardTab = "ukoly", intInfo = null, intYM = null;
+let boardTab = "ukoly", intInfo = null, intYM = null, intDay = null;
 const intData = {};
 
 const isAdmin = () => me && me.role === "admin";
@@ -139,6 +139,7 @@ function connectSSE() {
       // změna u aut ve šichtovnici (mechanik si vzal závadu, poznámka, servis…)
       if (d.kind === "vozidla") { refreshFleet(); return; }
       if (d.kind === "lide") { refreshPeople(); return; }
+      if (d.kind === "vyplaty") { refreshPayroll(); return; }
       clearTimeout(refetchTimer); refetchTimer = setTimeout(refetchState, 180);
     };
     evtSource.onerror = () => { setSync("offline", "Spojení přerušeno – obnovuji…"); };
@@ -501,7 +502,7 @@ function buildBadges(card) {
 /* ============================================================
    Integrace: Lidé / Výplaty / Vozidla (šichtovnice + podpisy)
    ============================================================ */
-const TAB_LABELS = { ukoly: "Úkoly", lide: "Řidiči", vyplaty: "Výplaty", vozidla: "Vozidla" };
+const TAB_LABELS = { ukoly: "Úkoly", smeny: "Směny", lide: "Řidiči", vyplaty: "Výplaty", vozidla: "Vozidla" };
 // Vstupní test: pod hranicí kurýr neprošel
 const TEST_PASS = 70;
 const testClass = (pct) => pct < TEST_PASS ? "danger" : pct < 80 ? "warn" : "ok";
@@ -546,12 +547,12 @@ function renderBoardTabs() {
   if (!onTasks) el("boardMembers").hidden = true;
 }
 
-const intKey = (boardId) => `${boardId}:${boardTab}` + (boardTab === "vyplaty" ? `:${intYM.y}-${intYM.m}` : "");
+const intKey = (boardId) => `${boardId}:${boardTab}` + (boardTab === "vyplaty" ? `:${intYM.y}-${intYM.m}` : boardTab === "smeny" ? `:${intDay}` : "");
 async function loadIntTab(fresh) {
   const b = getBoard(); if (!b) return;
   const tab = boardTab; const key = intKey(b.id);
   intData[key] = { loading: true };
-  const qs = new URLSearchParams(); if (tab === "vyplaty") { qs.set("year", intYM.y); qs.set("month", intYM.m); } if (fresh) qs.set("refresh", "1");
+  const qs = new URLSearchParams(); if (tab === "vyplaty") { qs.set("year", intYM.y); qs.set("month", intYM.m); } if (tab === "smeny") qs.set("datum", intDay); if (fresh) qs.set("refresh", "1");
   try { intData[key] = { data: await intGet(`/board/${b.id}/${tab}` + (qs.toString() ? "?" + qs : "")) }; }
   catch (e) { if (e.unauth) return; intData[key] = { error: e.message }; }
   if (viewMode === "board" && currentBoardId === b.id && boardTab === tab) renderIntTab();
@@ -559,6 +560,7 @@ async function loadIntTab(fresh) {
 function renderIntTab() {
   const b = getBoard(); if (!b) return;
   if (!intYM) { const d = new Date(); intYM = { y: d.getFullYear(), m: d.getMonth() + 1 }; }
+  if (!intDay) intDay = toInputDate(Date.now());
   const key = intKey(b.id);
   if (!intData[key]) loadIntTab();
   const entry = intData[key];
@@ -568,11 +570,12 @@ function renderIntTab() {
   const bar = document.createElement("div"); bar.className = "int-toolbar";
   const h = document.createElement("h2"); h.className = "int-title"; h.textContent = TAB_LABELS[boardTab]; bar.appendChild(h);
   if (entry && entry.data) {
-    const n = boardTab === "lide" ? entry.data.people.length : boardTab === "vozidla" ? entry.data.vozidla.length : entry.data.ridici.length + entry.data.brigadnici.length;
+    const n = boardTab === "lide" ? entry.data.people.length : boardTab === "vozidla" ? entry.data.vozidla.length : boardTab === "smeny" ? entry.data.smeny.length : entry.data.ridici.length + entry.data.brigadnici.length;
     const c = document.createElement("span"); c.className = "section-count"; c.textContent = n; h.appendChild(c);
   }
   const right = document.createElement("div"); right.className = "int-actions";
   if (boardTab === "vyplaty") right.appendChild(monthSwitcher());
+  if (boardTab === "smeny") right.appendChild(daySwitcher());
   const refresh = document.createElement("button"); refresh.className = "pill-btn"; refresh.innerHTML = `${icon("activity", 16)}<span>Obnovit</span>`;
   refresh.disabled = !!(entry && entry.loading); refresh.onclick = () => { loadIntTab(true); renderIntTab(); };
   right.appendChild(refresh);
@@ -590,6 +593,19 @@ function renderIntTab() {
   if (boardTab === "lide") renderPeople(box, entry.data);
   else if (boardTab === "vyplaty") renderPayroll(box, entry.data);
   else if (boardTab === "vozidla") renderFleet(box, entry.data);
+  else if (boardTab === "smeny") renderShifts(box, entry.data);
+}
+function daySwitcher() {
+  const wrap = document.createElement("div"); wrap.className = "month-switch";
+  const d = new Date(intDay + "T12:00:00"); const today = toInputDate(Date.now());
+  const step = (n) => { const t = new Date(d); t.setDate(t.getDate() + n); intDay = toInputDate(t.getTime()); renderIntTab(); };
+  const prev = document.createElement("button"); prev.className = "icon-btn"; prev.setAttribute("aria-label", "Předchozí den"); prev.textContent = "‹"; prev.onclick = () => step(-1);
+  const next = document.createElement("button"); next.className = "icon-btn"; next.setAttribute("aria-label", "Další den"); next.textContent = "›"; next.onclick = () => step(1);
+  const span = document.createElement("button"); span.className = "month-label day-label"; span.title = "Zpět na dnešek";
+  const rel = intDay === today ? "Dnes · " : "";
+  const label = d.toLocaleDateString("cs-CZ", { weekday: "short", day: "numeric", month: "numeric" });
+  span.textContent = rel + label; span.onclick = () => { if (intDay !== today) { intDay = today; renderIntTab(); } };
+  wrap.append(prev, span, next); return wrap;
 }
 function monthSwitcher() {
   const wrap = document.createElement("div"); wrap.className = "month-switch";
@@ -844,8 +860,19 @@ el("personClose").onclick = closePerson;
 el("personOverlay").addEventListener("click", (e) => { if (e.target === el("personOverlay")) closePerson(); });
 
 /* ---------- Výplaty ---------- */
+function refreshPayroll() {
+  Object.keys(intData).forEach((k) => { if (k.includes(":vyplaty")) delete intData[k]; });
+  if (viewMode === "board" && boardTab === "vyplaty") renderIntTab();
+}
 function renderPayroll(box, data) {
+  if (data.canFine) {
+    const add = document.createElement("div"); add.className = "people-actions";
+    add.innerHTML = `<button class="primary-btn">${icon("plus", 16)}<span>Pokuta / bonus</span></button>`;
+    add.querySelector("button").onclick = (e) => finePopover(e.currentTarget, data);
+    box.appendChild(add);
+  }
   if (data.foodisError) intBanner(box, "warn", "Zálohy a bonusy za objednávky z Foodisu se nepodařilo načíst – částky jsou bez nich.");
+  if (data.uctenky && data.uctenky.length) box.appendChild(receiptsSection(data.uctenky));
   const all = [...data.ridici, ...data.brigadnici];
   if (!all.length) { box.insertAdjacentHTML("beforeend", `<div class="int-empty">V tomhle měsíci zatím nikdo nemá odjeté směny.</div>`); return; }
   const total = all.reduce((s, r) => s + (Number(r.toPay) || 0), 0);
@@ -855,11 +882,89 @@ function renderPayroll(box, data) {
     <div class="stat"><span class="stat-label">Lidí s výplatou</span><span class="stat-value">${all.length}</span></div>
     <div class="stat"><span class="stat-label">Srážky a pokuty</span><span class="stat-value ${fines < 0 ? "neg" : ""}">${czk(fines)}</span></div>`;
   box.appendChild(stats);
-  if (data.ridici.length) box.appendChild(payTable("Řidiči OSVČ", data.ridici, true, data.pronajemVozidla));
-  if (data.brigadnici.length) box.appendChild(payTable("Brigádníci", data.brigadnici, false));
+  if (data.ridici.length) box.appendChild(payTable("Řidiči OSVČ", data.ridici, true, data.pronajemVozidla, data));
+  if (data.brigadnici.length) box.appendChild(payTable("Brigádníci", data.brigadnici, false, 0, data));
+}
+const FINE_REASONS = ["Pozdní příchod", "Chybějící předávka auta", "Neomluvená absence", "Poškození auta", "Chyba v objednávce"];
+// Pokuta (srážka) nebo bonus → rovnou do šichtovnice, projeví se ve fakturaci za zvolený měsíc
+function finePopover(anchor, data, courierId) {
+  const people = new Map((data.kuryri || []).map((k) => [String(k.id), k.name]));
+  [...data.ridici, ...data.brigadnici].forEach((r) => { if (!people.has(String(r.courierId))) people.set(String(r.courierId), r.name); });
+  const opts = [...people.entries()].sort((a, b) => a[1].localeCompare(b[1], "cs"))
+    .map(([id, name]) => `<option value="${escapeHtml(id)}"${String(courierId) === id ? " selected" : ""}>${escapeHtml(name)}</option>`).join("");
+  const monthLabel = new Date(intYM.y, intYM.m - 1, 1).toLocaleDateString("cs-CZ", { month: "long", year: "numeric" });
+  const body = document.createElement("div"); body.className = "fine-form";
+  body.innerHTML = `<div class="seg" role="radiogroup" aria-label="Typ">
+      <label><input type="radio" name="fineKind" value="fine" checked><span>Pokuta</span></label>
+      <label><input type="radio" name="fineKind" value="bonus"><span>Bonus</span></label></div>
+    <label class="quick-label">Kurýr</label>
+    <select class="pop-input fine-courier"><option value="">Vyberte…</option>${opts}</select>
+    <label class="quick-label">Částka (Kč)</label>
+    <input class="pop-input fine-amount" type="number" inputmode="numeric" min="1" step="1" placeholder="např. 500">
+    <label class="quick-label">Důvod</label>
+    <input class="pop-input fine-reason" maxlength="300" placeholder="Za co?">
+    <div class="fine-quick">${FINE_REASONS.map((r) => `<button type="button" class="chip-btn">${escapeHtml(r)}</button>`).join("")}</div>
+    <p class="muted-sm fine-note">Zapíše se do šichtovnice za ${escapeHtml(monthLabel)} a hned se odečte z výplaty.</p>`;
+  const reason = body.querySelector(".fine-reason");
+  body.querySelectorAll(".fine-quick .chip-btn").forEach((b) => b.onclick = () => { reason.value = b.textContent; reason.focus(); });
+  const btn = document.createElement("button"); btn.className = "pop-btn"; btn.textContent = "Zapsat pokutu";
+  body.querySelectorAll("input[name=fineKind]").forEach((r) => r.onchange = () => {
+    const bonus = body.querySelector("input[name=fineKind]:checked").value === "bonus";
+    btn.textContent = bonus ? "Zapsat bonus" : "Zapsat pokutu";
+    body.querySelector(".fine-quick").hidden = bonus;
+    body.querySelector(".fine-note").textContent = `Zapíše se do šichtovnice za ${monthLabel} a hned se ${bonus ? "přičte k výplatě" : "odečte z výplaty"}.`;
+  });
+  btn.onclick = async () => {
+    const b = getBoard(); if (!b) return;
+    const kind = body.querySelector("input[name=fineKind]:checked").value;
+    const cid = body.querySelector(".fine-courier").value; const amount = Number(body.querySelector(".fine-amount").value);
+    if (!cid) return toast("Vyberte kurýra.");
+    if (!(amount > 0)) return toast("Zadejte částku.");
+    if (!reason.value.trim()) return toast("Napište důvod.");
+    btn.disabled = true;
+    try {
+      await intSend("POST", `/board/${b.id}/pokuty`, { courierId: cid, kind, amount, reason: reason.value.trim(), year: intYM.y, month: intYM.m });
+      closePopover(); toast(kind === "bonus" ? "Bonus zapsán." : `Pokuta ${czk(amount)} zapsána – ${people.get(cid)}.`);
+      delete intData[intKey(b.id)]; loadIntTab(true);
+    } catch (e) { if (!e.unauth) toast(e.message); btn.disabled = false; }
+  };
+  body.appendChild(btn);
+  popover(anchor, "Pokuta / bonus", body);
+  body.querySelector(courierId ? ".fine-amount" : ".fine-courier").focus();
+}
+async function deleteBonusItem(id) {
+  const b = getBoard(); if (!b) return;
+  if (!confirm("Smazat tuhle položku? Zmizí i ze šichtovnice.")) return;
+  try { await intSend("DELETE", `/board/${b.id}/pokuty/${id}?year=${intYM.y}&month=${intYM.m}`); toast("Smazáno."); delete intData[intKey(b.id)]; loadIntTab(true); }
+  catch (e) { if (!e.unauth) toast(e.message); }
+}
+// Účtenky, které kurýři nahráli v Moje data – do výplaty jdou až po schválení
+function receiptsSection(list) {
+  const b = getBoard();
+  const sec = document.createElement("section"); sec.className = "pay-section receipts";
+  sec.innerHTML = `<h3 class="pay-title">Účtenky ke schválení <span class="section-count">${list.length}</span></h3>`;
+  const ul = document.createElement("ul"); ul.className = "receipt-list";
+  list.forEach((u) => {
+    const li = document.createElement("li"); li.className = "receipt";
+    const period = u.month && u.year ? new Date(u.year, u.month - 1, 1).toLocaleDateString("cs-CZ", { month: "long" }) : "";
+    li.innerHTML = `<div class="receipt-main"><span class="pay-name">${escapeHtml(u.courier_name)}</span>
+        <span class="muted-sm">${escapeHtml(u.reason || "Účtenka")}${period ? " · za " + escapeHtml(period) : ""} · nahráno ${escapeHtml(fmtDate(u.created_at))}</span></div>
+      <span class="mono strong">${u.amount != null ? czk(u.amount) : "—"}</span>
+      <div class="receipt-actions">${u.has_photo ? `<a class="pill-btn" href="/api/integrace/board/${b.id}/uctenky/${u.id}/foto" target="_blank" rel="noopener">Fotka</a>` : `<span class="muted-sm">bez fotky</span>`}
+        <button class="pill-btn r-reject">Zamítnout</button><button class="primary-btn r-accept">Schválit</button></div>`;
+    const act = async (status) => {
+      li.querySelectorAll("button").forEach((x) => x.disabled = true);
+      try { await intSend("POST", `/board/${b.id}/uctenky/${u.id}`, { status }); toast(status === "accepted" ? "Účtenka schválena – přičte se k výplatě." : "Účtenka zamítnuta."); delete intData[intKey(b.id)]; loadIntTab(true); }
+      catch (e) { if (!e.unauth) toast(e.message); li.querySelectorAll("button").forEach((x) => x.disabled = false); }
+    };
+    li.querySelector(".r-accept").onclick = () => act("accepted");
+    li.querySelector(".r-reject").onclick = () => { if (confirm(`Zamítnout účtenku od ${u.courier_name}?`)) act("rejected"); };
+    ul.appendChild(li);
+  });
+  sec.appendChild(ul); return sec;
 }
 function money(n, signed) { const v = Number(n) || 0; return `<span class="money${v < 0 ? " neg" : ""}">${signed && v > 0 ? "+" : ""}${czk(v)}</span>`; }
-function payTable(title, rows, ridic, pronajem) {
+function payTable(title, rows, ridic, pronajem, data) {
   const sec = document.createElement("section"); sec.className = "pay-section";
   sec.innerHTML = `<h3 class="pay-title">${title}</h3>`;
   const wrap = document.createElement("div"); wrap.className = "table-wrap";
@@ -873,7 +978,8 @@ function payTable(title, rows, ridic, pronajem) {
       <td class="num mono">${r.zaloha ? money(-r.zaloha) : "—"}</td><td class="num mono">${r.orderBonus ? money(r.orderBonus, true) : "—"}</td>
       <td class="num mono">${r.manualBonus ? money(r.manualBonus, true) : "—"}</td><td class="num mono strong">${money(r.toPay)}</td>`;
     const detail = document.createElement("tr"); detail.className = "pay-detail"; detail.hidden = true;
-    const items = (r.bonusItems || []).map((b) => `<li><span>${escapeHtml(b.reason)}</span>${b.amount == null ? `<span class="muted-sm">bez částky</span>` : money(b.amount, true)}</li>`).join("");
+    const items = (r.bonusItems || []).map((b) => `<li><span>${escapeHtml(b.reason)}${b.fromTrello ? `<span class="muted-sm"> · ${escapeHtml(b.author)}, Trello</span>` : ""}</span>
+      <span class="bonus-amt">${b.amount == null ? `<span class="muted-sm">bez částky</span>` : money(b.amount, true)}${b.canDelete ? `<button class="icon-btn sm bonus-del" data-id="${escapeHtml(String(b.id))}" title="Smazat" aria-label="Smazat">${icon("trash", 14)}</button>` : ""}</span></li>`).join("");
     const shifts = ridic ? `Ranní ${r.morningCount} · Odpolední ${r.afternoonCount} · Celodenní ${r.fulldayCount}` : `${r.shiftCount} ${plural(r.shiftCount, "směna", "směny", "směn")}`;
     detail.innerHTML = `<td colspan="8"><div class="pay-detail-box">
       <div class="pay-mobile-lines">
@@ -885,15 +991,54 @@ function payTable(title, rows, ridic, pronajem) {
       </div>
       <div><span class="pf-label">Směny</span> ${shifts}</div>
       <div><span class="pf-label">Bonusy a srážky</span>${items ? `<ul class="bonus-list">${items}</ul>` : ` <span class="muted-sm">žádné</span>`}</div>
+      ${data && data.canFine ? `<div><button class="pill-btn fine-add">${icon("plus", 16)}<span>Pokuta / bonus pro ${escapeHtml(r.name)}</span></button></div>` : ""}
       ${ridic && pronajem ? `<div class="muted-sm">Pronájem vozidla ${czk(pronajem)} je samostatná položka na faktuře – v částce k výplatě není.</div>` : ""}
       ${r.foodisMatched === false ? `<div class="muted-sm">Kurýr se nespároval s Foodisem – záloha a bonus za objednávky chybí.</div>` : ""}
     </div></td>`;
+    const fineAdd = detail.querySelector(".fine-add"); if (fineAdd) fineAdd.onclick = (e) => finePopover(e.currentTarget, data, r.courierId);
+    detail.querySelectorAll(".bonus-del").forEach((x) => x.onclick = () => deleteBonusItem(x.dataset.id));
     const toggle = () => { detail.hidden = !detail.hidden; tr.classList.toggle("open", !detail.hidden); };
     tr.onclick = toggle; tr.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } };
     tb.append(tr, detail);
   });
   table.appendChild(tb); wrap.appendChild(table); sec.appendChild(wrap);
   return sec;
+}
+
+/* ---------- Směny ---------- */
+const SHIFT_GROUPS = [
+  { key: "fullday", title: "Celodenní", time: "10:30 – konec" },
+  { key: "morning", title: "Ranní", time: "10:30 – 16:00" },
+  { key: "afternoon", title: "Odpolední", time: "16:00 – konec" },
+];
+function renderShifts(box, data) {
+  if (!data.smeny.length) { box.insertAdjacentHTML("beforeend", `<div class="int-empty">Na tenhle den nikdo nemá směnu.</div>`); return; }
+  const today = toInputDate(Date.now()), past = data.datum < today, isToday = data.datum === today;
+  // Hlídač předávek řeší ranní a celodenní; odpolední se jen zobrazí
+  const late = (s) => data.predavky && !s.predavka && (past || (isToday && s.shift !== "afternoon"));
+  const missing = data.smeny.filter(late).length;
+  const count = (k) => data.smeny.filter((s) => s.shift === k).length;
+  const stats = document.createElement("div"); stats.className = "pay-stats";
+  stats.innerHTML = `<div class="stat"><span class="stat-label">Na směně</span><span class="stat-value">${data.smeny.length}</span></div>
+    <div class="stat"><span class="stat-label">Ranní / odpolední / celodenní</span><span class="stat-value">${count("morning")} / ${count("afternoon")} / ${count("fullday")}</span></div>
+    ${data.predavky && (past || isToday) ? `<div class="stat"><span class="stat-label">Bez předávky auta</span><span class="stat-value ${missing ? "neg" : ""}">${missing}</span></div>` : ""}`;
+  box.appendChild(stats);
+  const grid = document.createElement("div"); grid.className = "shift-cols";
+  SHIFT_GROUPS.forEach((g) => {
+    const people = data.smeny.filter((s) => s.shift === g.key); if (!people.length) return;
+    const col = document.createElement("section"); col.className = "shift-col";
+    col.innerHTML = `<h3 class="pay-title">${g.title} <span class="section-count">${people.length}</span> <span class="muted-sm">${g.time}</span></h3>`;
+    const ul = document.createElement("ul"); ul.className = "shift-list";
+    people.forEach((s) => {
+      const chip = !data.predavky ? "" : s.predavka
+        ? `<span class="chip ok">Předávka ${s.predavka.at ? escapeHtml(new Date(s.predavka.at).toLocaleTimeString("cs-CZ", { hour: "2-digit", minute: "2-digit" })) : ""}${s.predavka.spz ? " · " + escapeHtml(s.predavka.spz) : ""}</span>`
+        : late(s) ? `<span class="chip danger">Bez předávky</span>` : (isToday ? `<span class="chip muted">Předávka zatím ne</span>` : "");
+      ul.insertAdjacentHTML("beforeend", `<li><span class="shift-who"><span class="pay-name">${escapeHtml(s.name)}</span>
+        ${s.phone ? `<a class="person-phone" href="tel:${escapeHtml(s.phone.replace(/\s/g, ""))}">${icon("phone", 12)}${escapeHtml(s.phone)}</a>` : ""}</span>${chip}</li>`);
+    });
+    col.appendChild(ul); grid.appendChild(col);
+  });
+  box.appendChild(grid);
 }
 
 /* ---------- Vozidla ---------- */

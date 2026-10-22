@@ -771,6 +771,7 @@ app.get("/api/integrace/board/:boardId", requireAuth, async (req, res) => {
   if (!(await intCities()).includes(city)) return res.json({ city: null, tabs: [] });
   const tabs = [];
   if (tabVisible(req.user, b, "ukoly")) tabs.push("ukoly");
+  if (tabVisible(req.user, b, "smeny")) tabs.push("smeny");
   if (tabAllowed(req.user, b, "Zaměstnanci") && tabVisible(req.user, b, "lide")) tabs.push("lide");
   if (tabVisible(req.user, b, "vyplaty")) tabs.push("vyplaty");
   if (tabAllowed(req.user, b, "Vozidla") && tabVisible(req.user, b, "vozidla")) tabs.push("vozidla");
@@ -868,7 +869,107 @@ app.get("/api/integrace/board/:boardId/vyplaty", requireAuth, async (req, res) =
   const year = Number(req.query.year), month = Number(req.query.month);
   if (!year || !month || month < 1 || month > 12) return res.status(400).json({ error: "bad_month" });
   try {
-    const data = await upstream("smenovnik", `/vyplaty?city=${encodeURIComponent(ctx.city)}&year=${year}&month=${month}`, { ttl: 2 * 60e3, fresh: req.query.refresh === "1" });
+    const fresh = req.query.refresh === "1";
+    const admin = isAdmin(req.user);
+    const [raw, kur, uct] = await Promise.all([
+      upstream("smenovnik", `/vyplaty?city=${encodeURIComponent(ctx.city)}&year=${year}&month=${month}`, { ttl: 2 * 60e3, fresh }),
+      // výběr kurýra pro pokutu – i ten, kdo v měsíci zatím nemá směnu
+      upstream("smenovnik", "/kuryri?city=" + encodeURIComponent(ctx.city), { ttl: 5 * 60e3, fresh }).catch(() => []),
+      // účtenky ke schválení vidí (a schvaluje) jen admin
+      admin ? upstream("smenovnik", "/uctenky?city=" + encodeURIComponent(ctx.city), { ttl: 60e3, fresh }).catch(() => null) : null,
+    ]);
+    const data = structuredClone(raw); // cache se nesmí přepsat úpravami níž
+    const me = TRELLO_AUTHOR + req.user.name;
+    const mark = (rows) => rows.forEach((r) => (r.bonusItems || []).forEach((b) => {
+      b.fromTrello = String(b.createdBy || "").startsWith(TRELLO_AUTHOR);
+      b.author = b.fromTrello ? b.createdBy.slice(TRELLO_AUTHOR.length) : "";
+      b.canDelete = b.fromTrello && (admin || b.createdBy === me);
+      delete b.createdBy;
+    }));
+    mark(data.ridici); mark(data.brigadnici);
+    res.json({
+      ...data, links: intLinks(), canFine: true, uctenky: uct,
+      kuryri: kur.filter((c) => c.is_active).map((c) => ({ id: c.id, name: (c.fakturace_name || "").trim() || c.name })).sort((a, b) => a.name.localeCompare(b.name, "cs")),
+    });
+  } catch (e) { res.status(502).json({ error: "upstream", message: upstreamError(e) }); }
+});
+
+/* Pokuty a bonusy z Trella → tabulka bonusů ve šichtovnici (stejná jako stránka
+   Bonus/Srážka). Přidat smí každý, kdo vidí Výplaty daného města; smazat jen
+   autor nebo admin, a jen záznam přidaný z Trella. */
+const TRELLO_AUTHOR = "trello:";
+async function payrollBoard(req, res) {
+  const ctx = await intBoard(req, res); if (!ctx) return null;
+  if (!tabVisible(req.user, ctx.b, "vyplaty")) { res.status(403).json({ error: "forbidden" }); return null; }
+  return ctx;
+}
+app.post("/api/integrace/board/:boardId/pokuty", requireAuth, async (req, res) => {
+  const ctx = await payrollBoard(req, res); if (!ctx) return;
+  const b = req.body || {};
+  const year = Number(b.year), month = Number(b.month);
+  const amount = Math.round(Math.abs(Number(String(b.amount || "").replace(/\s/g, "").replace(",", "."))));
+  const reason = String(b.reason || "").trim();
+  if (!b.courierId) return res.status(400).json({ error: "empty", message: "Vyberte kurýra." });
+  if (!amount) return res.status(400).json({ error: "empty", message: "Zadejte částku." });
+  if (!reason) return res.status(400).json({ error: "empty", message: "Napište důvod." });
+  try {
+    const r = await upstreamWrite("smenovnik", "POST", "/bonusy", {
+      city: ctx.city, courierId: String(b.courierId), year, month,
+      amount: b.kind === "bonus" ? amount : -amount, reason, autor: req.user.name,
+    });
+    broadcast(req.header("x-client-id"), "vyplaty");
+    res.status(201).json(r);
+  } catch (e) { writeError(res, e); }
+});
+app.delete("/api/integrace/board/:boardId/pokuty/:id", requireAuth, async (req, res) => {
+  const ctx = await payrollBoard(req, res); if (!ctx) return;
+  const year = Number(req.query.year), month = Number(req.query.month);
+  if (!year || !month) return res.status(400).json({ error: "bad_month" });
+  try {
+    const data = await upstream("smenovnik", `/vyplaty?city=${encodeURIComponent(ctx.city)}&year=${year}&month=${month}`, { fresh: true });
+    const item = [...data.ridici, ...data.brigadnici].flatMap((r) => r.bonusItems || []).find((x) => String(x.id) === String(req.params.id));
+    if (!item || !String(item.createdBy || "").startsWith(TRELLO_AUTHOR)) return res.status(404).json({ error: "not_found", message: "Záznam nenalezen nebo nebyl přidán z Trella." });
+    if (!isAdmin(req.user) && item.createdBy !== TRELLO_AUTHOR + req.user.name) return res.status(403).json({ error: "forbidden", message: "Smazat může jen ten, kdo záznam přidal, nebo admin." });
+    await upstreamWrite("smenovnik", "DELETE", `/bonusy/${encodeURIComponent(req.params.id)}`, {});
+    broadcast(req.header("x-client-id"), "vyplaty");
+    res.json({ ok: true });
+  } catch (e) { writeError(res, e); }
+});
+
+// Účtenky od kurýrů (benzín, servis…) – schválení z Trella, jen admin
+app.post("/api/integrace/board/:boardId/uctenky/:id", requireAuth, requireAdmin, async (req, res) => {
+  const ctx = await payrollBoard(req, res); if (!ctx) return;
+  const status = req.body && req.body.status === "accepted" ? "accepted" : req.body && req.body.status === "rejected" ? "rejected" : null;
+  if (!status) return res.status(400).json({ error: "bad_status" });
+  try {
+    const pending = await upstream("smenovnik", "/uctenky?city=" + encodeURIComponent(ctx.city), { fresh: true });
+    if (!pending.some((u) => String(u.id) === String(req.params.id))) return res.status(404).json({ error: "not_found", message: "Účtenka už není ke schválení." });
+    await upstreamWrite("smenovnik", "PUT", `/uctenky/${encodeURIComponent(req.params.id)}`, { status, autor: req.user.name });
+    broadcast(req.header("x-client-id"), "vyplaty");
+    res.json({ ok: true, status });
+  } catch (e) { writeError(res, e); }
+});
+app.get("/api/integrace/board/:boardId/uctenky/:id/foto", requireAuth, requireAdmin, async (req, res) => {
+  const ctx = await payrollBoard(req, res); if (!ctx) return;
+  try {
+    const pending = await upstream("smenovnik", "/uctenky?city=" + encodeURIComponent(ctx.city), { ttl: 60e3 });
+    if (!pending.some((u) => String(u.id) === String(req.params.id))) return res.status(404).end();
+    const r = await fetch(`${INT.smenovnik.url}/api/integrace/uctenky/${encodeURIComponent(req.params.id)}/foto`, { headers: { "x-integrace-key": INT.smenovnik.key } });
+    if (!r.ok) return res.status(r.status === 404 ? 404 : 502).end();
+    res.setHeader("Content-Type", r.headers.get("content-type") || "image/jpeg");
+    res.setHeader("Cache-Control", "private, max-age=300");
+    res.send(Buffer.from(await r.arrayBuffer()));
+  } catch (e) { res.status(502).end(); }
+});
+
+// Směny: kdo dnes (nebo v jiný den) jezdí a jestli už odeslal předávku auta
+app.get("/api/integrace/board/:boardId/smeny", requireAuth, async (req, res) => {
+  const ctx = await intBoard(req, res); if (!ctx) return;
+  if (!tabVisible(req.user, ctx.b, "smeny")) return res.status(403).json({ error: "forbidden" });
+  const datum = String(req.query.datum || "");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(datum)) return res.status(400).json({ error: "bad_date" });
+  try {
+    const data = await upstream("smenovnik", `/smeny?city=${encodeURIComponent(ctx.city)}&datum=${datum}`, { ttl: 60e3, fresh: req.query.refresh === "1" });
     res.json({ ...data, links: intLinks() });
   } catch (e) { res.status(502).json({ error: "upstream", message: upstreamError(e) }); }
 });

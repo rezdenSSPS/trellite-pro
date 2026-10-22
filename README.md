@@ -53,6 +53,17 @@ Záložka se ukáže jen u města, které šichtovnice zná.
 | `PODPISY_KEY` | Trello | stejná hodnota jako `INTEGRACE_API_KEY` v podpisech |
 | `INTEGRACE_API_KEY` | šichtovnice, podpisy | náhodný tajný klíč (`openssl rand -hex 32`) |
 
+Záložky navíc:
+
+- **Směny** – kdo má ve vybraný den ranní / odpolední / celodenní směnu, telefon
+  a jestli už odeslal předávku auta (ranní a celodenní bez předávky = červeně).
+- **Výplaty → Pokuta / bonus** – zapíše pokutu (srážku) nebo bonus kurýrovi za
+  zobrazený měsíc rovnou do šichtovnice (stejná tabulka jako stránka
+  Bonus/Srážka), takže se hned promítne do fakturace. Přidat smí každý, kdo vidí
+  Výplaty města; smazat jen autor nebo admin a jen položky přidané z Trella.
+- **Výplaty → Účtenky ke schválení** – účtenky, které kurýři nahráli v Moje data;
+  admin je může prohlédnout (fotka) a schválit / zamítnout.
+
 Oprávnění: záložka **Lidé** se řídí viditelností seznamu „Zaměstnanci“ a
 **Vozidla** seznamu „Vozidla“ — komu admin seznam skryje, nevidí ani data.
 **Výplaty** vidí každý, kdo vidí nástěnku.
