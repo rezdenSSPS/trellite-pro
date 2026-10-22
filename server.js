@@ -782,10 +782,13 @@ app.get("/api/integrace/board/:boardId/lide", requireAuth, async (req, res) => {
   const ctx = await intBoard(req, res); if (!ctx) return;
   if (!tabAllowed(req.user, ctx.b, "Zaměstnanci") || !tabVisible(req.user, ctx.b, "lide")) return res.status(403).json({ error: "forbidden" });
   const fresh = req.query.refresh === "1";
-  const [kur, sml] = await Promise.allSettled([
+  const [kur, sml, hod] = await Promise.allSettled([
     upstream("smenovnik", "/kuryri?city=" + encodeURIComponent(ctx.city), { fresh }),
     intEnabled("podpisy") ? upstream("podpisy", "/kuryri", { fresh }) : Promise.reject(new Error("not_configured")),
+    // hodnocení z Foodisu – pomalé a nepovinné, výpadek Lidi nerozbije
+    upstream("smenovnik", "/hodnoceni?city=" + encodeURIComponent(ctx.city), { ttl: 10 * 60e3 }),
   ]);
+  const ratings = hod.status === "fulfilled" ? hod.value : {};
   const couriers = kur.status === "fulfilled" ? kur.value : [];
   const records = sml.status === "fulfilled" ? sml.value : [];
 
@@ -793,7 +796,7 @@ app.get("/api/integrace/board/:boardId/lide", requireAuth, async (req, res) => {
     key: "s:" + c.id, smenovnikId: c.id, name: (c.fakturace_name || "").trim() || c.name, shortName: c.name,
     level: c.level, isRidic: /řidič/i.test(c.level || ""), dayRate: c.day_rate, isActive: c.is_active, role: c.role,
     phone: c.phone || "", ico: c.ico || "", dic: c.dic || "", invoiceAddress: c.invoice_address || "",
-    bankAccount: c.bank_account || "", since: c.created_at, records: [],
+    bankAccount: c.bank_account || "", since: c.created_at, rating: ratings[c.id] || null, records: [],
   }));
   const byId = new Map(people.map((p) => [p.smenovnikId, p]));
   const byName = new Map(people.map((p) => [nameKey(p.name), p]));
@@ -827,6 +830,14 @@ app.get("/api/integrace/board/:boardId/lide", requireAuth, async (req, res) => {
     people, links: intLinks(),
     errors: { smenovnik: kur.status === "rejected" ? upstreamError(kur.reason) : null, podpisy: sml.status === "rejected" ? upstreamError(sml.reason) : null },
   });
+});
+
+// Recenze z Foodisu pro detail kurýra (načítá se až po otevření)
+app.get("/api/integrace/board/:boardId/lide/:courierId/hodnoceni", requireAuth, async (req, res) => {
+  const ctx = await intBoard(req, res); if (!ctx) return;
+  if (!tabAllowed(req.user, ctx.b, "Zaměstnanci") || !tabVisible(req.user, ctx.b, "lide")) return res.status(403).json({ error: "forbidden" });
+  try { res.json(await upstream("smenovnik", `/hodnoceni/${encodeURIComponent(req.params.courierId)}?city=${encodeURIComponent(ctx.city)}`, { ttl: 10 * 60e3 })); }
+  catch (e) { res.status(502).json({ error: "upstream", message: upstreamError(e) }); }
 });
 
 /* Nový kurýr z Trella: formulář je definovaný v podpisech (typ spolupráce,
@@ -871,12 +882,15 @@ app.get("/api/integrace/board/:boardId/vyplaty", requireAuth, async (req, res) =
   try {
     const fresh = req.query.refresh === "1";
     const admin = isAdmin(req.user);
-    const [raw, kur, uct] = await Promise.all([
+    const ym = `city=${encodeURIComponent(ctx.city)}&year=${year}&month=${month}`;
+    const [raw, kur, uct, fak, poz] = await Promise.all([
       upstream("smenovnik", `/vyplaty?city=${encodeURIComponent(ctx.city)}&year=${year}&month=${month}`, { ttl: 2 * 60e3, fresh }),
       // výběr kurýra pro pokutu – i ten, kdo v měsíci zatím nemá směnu
       upstream("smenovnik", "/kuryri?city=" + encodeURIComponent(ctx.city), { ttl: 5 * 60e3, fresh }).catch(() => []),
       // účtenky ke schválení vidí (a schvaluje) jen admin
       admin ? upstream("smenovnik", "/uctenky?city=" + encodeURIComponent(ctx.city), { ttl: 60e3, fresh }).catch(() => null) : null,
+      upstream("smenovnik", "/faktury-osvc?" + ym, { ttl: 60e3, fresh }).catch(() => null),
+      upstream("smenovnik", `/pozdni-prichody?${ym}&deadline=${encodeURIComponent(PREDAVKA_DEADLINE)}`, { ttl: 60e3, fresh }).catch(() => null),
     ]);
     const data = structuredClone(raw); // cache se nesmí přepsat úpravami níž
     const me = TRELLO_AUTHOR + req.user.name;
@@ -887,8 +901,12 @@ app.get("/api/integrace/board/:boardId/vyplaty", requireAuth, async (req, res) =
       delete b.createdBy;
     }));
     mark(data.ridici); mark(data.brigadnici);
+    // Faktura OSVČ, kterou kurýr za měsíc schválil v Moje data (PDF jen pro admina)
+    if (fak) data.ridici.forEach((r) => { const f = fak[r.courierId]; r.faktura = f ? { ...f, pdf: admin } : null; });
+    const monthDone = new Date(year, month, 1) <= new Date();
     res.json({
       ...data, links: intLinks(), canFine: true, uctenky: uct,
+      fakturyNactene: !!fak, mesicSkoncil: monthDone, pozdni: poz,
       kuryri: kur.filter((c) => c.is_active).map((c) => ({ id: c.id, name: (c.fakturace_name || "").trim() || c.name })).sort((a, b) => a.name.localeCompare(b.name, "cs")),
     });
   } catch (e) { res.status(502).json({ error: "upstream", message: upstreamError(e) }); }
@@ -934,6 +952,20 @@ app.delete("/api/integrace/board/:boardId/pokuty/:id", requireAuth, async (req, 
     broadcast(req.header("x-client-id"), "vyplaty");
     res.json({ ok: true });
   } catch (e) { writeError(res, e); }
+});
+
+app.get("/api/integrace/board/:boardId/faktury/:id/pdf", requireAuth, requireAdmin, async (req, res) => {
+  const ctx = await payrollBoard(req, res); if (!ctx) return;
+  const year = Number(req.query.year), month = Number(req.query.month);
+  try {
+    const fak = await upstream("smenovnik", `/faktury-osvc?city=${encodeURIComponent(ctx.city)}&year=${year}&month=${month}`, { ttl: 60e3 });
+    if (!Object.values(fak || {}).some((f) => String(f.id) === String(req.params.id))) return res.status(404).end();
+    const r = await fetch(`${INT.smenovnik.url}/api/integrace/faktury-osvc/${encodeURIComponent(req.params.id)}/pdf`, { headers: { "x-integrace-key": INT.smenovnik.key } });
+    if (!r.ok) return res.status(r.status === 404 ? 404 : 502).end();
+    res.setHeader("Content-Type", "application/pdf");
+    const cd = r.headers.get("content-disposition"); if (cd) res.setHeader("Content-Disposition", cd);
+    res.send(Buffer.from(await r.arrayBuffer()));
+  } catch (e) { res.status(502).end(); }
 });
 
 // Účtenky od kurýrů (benzín, servis…) – schválení z Trella, jen admin

@@ -653,6 +653,10 @@ function renderPeople(box, data) {
   });
   box.appendChild(cols);
 }
+// Hodnocení z Foodisu: pod 4,5 hvězdy žlutě, pod 4 červeně
+const ratingCls = (avg) => avg < 4 ? "danger" : avg < 4.5 ? "warn" : "ok";
+const ratingChip = (r) => `<span class="chip ${ratingCls(r.avg)}" title="Hodnocení z Foodisu">★ ${num(r.avg)} <span class="chip-sub">(${r.count})</span></span>`;
+const stars = (n) => { const v = Math.max(0, Math.min(5, Math.round(Number(n) || 0))); return "★".repeat(v) + "☆".repeat(5 - v); };
 function personCardEl(p, links) {
   const card = document.createElement("button"); card.className = "person-card" + (p.isActive === false ? " inactive" : "");
   const color = colorFor(p.name);
@@ -663,6 +667,7 @@ function personCardEl(p, links) {
   if (p.test) chips.push(`<span class="chip ${testClass(p.test.percent)}">Test ${p.test.percent} %${p.test.percent < TEST_PASS ? " · Neprošel" : ""}</span>`);
   if (p.clothingSize) chips.push(`<span class="chip">Vel. ${escapeHtml(p.clothingSize)}</span>`);
   if (p.inventory && p.inventory.total) chips.push(`<span class="chip">Má ${p.inventory.total} ks oblečení</span>`);
+  if (p.rating) chips.push(ratingChip(p.rating));
   if (p.isActive === false) chips.push(`<span class="chip muted">Neaktivní</span>`);
   card.innerHTML = `<span class="avatar lg" style="background:${tint(color, 0.82)};color:${shade(color, 0.45)}">${escapeHtml(initials(p.name))}</span>
     <span class="person-main"><span class="person-name">${escapeHtml(p.name)}</span><span class="person-sub">${escapeHtml(personTypeLabel(p))}</span>
@@ -723,11 +728,23 @@ function openPerson(p, links) {
     ${p.phone || p.email ? `<div class="person-quick">${p.phone ? `<a class="pq main" href="tel:${escapeHtml(p.phone.replace(/\s+/g, ""))}">${icon("phone", 20)}<span>Zavolat</span></a><a class="pq" href="sms:${escapeHtml(p.phone.replace(/\s+/g, ""))}">${icon("message", 20)}<span>SMS</span></a>` : ""}${p.email ? `<a class="pq" href="mailto:${escapeHtml(p.email)}">${icon("mail", 20)}<span>E-mail</span></a>` : ""}</div>` : ""}
     <div class="person-grid">
       <div>${sec("Kontakt", contact)}${sec("Práce", work)}${sec("Fakturace a platby", billing)}</div>
-      <div>${sec("Smlouva", contract)}${sec("Pracovní oblečení", clothing)}${sec("Oblečení (co má)", owns)}${sec("Vstupní test", test)}</div>
+      <div>${p.smenovnikId ? `<section class="person-sec person-rating"><h3>Hodnocení z Foodisu</h3><div class="rating-body muted-sm">Načítám…</div></section>` : ""}${sec("Smlouva", contract)}${sec("Pracovní oblečení", clothing)}${sec("Oblečení (co má)", owns)}${sec("Vstupní test", test)}</div>
     </div>
     ${linkBtns.length ? `<div class="person-links">${linkBtns.join("")}</div>` : ""}`;
   bindCopyButtons(body);
   el("personOverlay").hidden = false;
+  if (p.smenovnikId) loadPersonRating(p, body.querySelector(".rating-body"));
+}
+async function loadPersonRating(p, box) {
+  const b = getBoard(); if (!b || !box) return;
+  try {
+    const j = await intGet(`/board/${b.id}/lide/${encodeURIComponent(p.smenovnikId)}/hodnoceni`);
+    if (!box.isConnected) return;
+    if (!j.rating) { box.innerHTML = `<p class="empty-note">Ve Foodisu jsme k němu hodnocení nenašli.</p>`; return; }
+    box.className = "rating-body";
+    box.innerHTML = `<div class="rating-head"><span class="rating-avg ${ratingCls(j.rating.avg)}">${num(j.rating.avg)}</span><span><span class="rating-stars">${stars(j.rating.avg)}</span><br><span class="muted-sm">${j.rating.count} ${plural(j.rating.count, "hodnocení", "hodnocení", "hodnocení")} celkem</span></span></div>
+      ${j.reviews.length ? `<ul class="review-list">${j.reviews.map((r) => `<li class="${r.rating <= 3 ? "bad" : ""}"><div class="review-top"><span class="rating-stars sm">${stars(r.rating)}</span><span class="muted-sm">${escapeHtml(r.date)}${r.restaurant ? " · " + escapeHtml(r.restaurant) : ""}</span></div>${r.comment ? `<div class="review-text">${escapeHtml(r.comment)}</div>` : ""}</li>`).join("")}</ul>` : `<p class="empty-note">Zatím bez slovních recenzí.</p>`}`;
+  } catch (e) { if (!e.unauth && box.isConnected) box.textContent = "Hodnocení se teď nepodařilo načíst."; }
 }
 function refreshPeople() {
   Object.keys(intData).forEach((k) => { if (k.endsWith(":lide")) delete intData[k]; });
@@ -880,14 +897,16 @@ function renderPayroll(box, data) {
   const stats = document.createElement("div"); stats.className = "pay-stats";
   stats.innerHTML = `<div class="stat"><span class="stat-label">K výplatě celkem</span><span class="stat-value">${czk(total)}</span></div>
     <div class="stat"><span class="stat-label">Lidí s výplatou</span><span class="stat-value">${all.length}</span></div>
-    <div class="stat"><span class="stat-label">Srážky a pokuty</span><span class="stat-value ${fines < 0 ? "neg" : ""}">${czk(fines)}</span></div>`;
+    <div class="stat"><span class="stat-label">Srážky a pokuty</span><span class="stat-value ${fines < 0 ? "neg" : ""}">${czk(fines)}</span></div>
+    ${data.fakturyNactene && data.ridici.length ? `<div class="stat"><span class="stat-label">Faktury OSVČ schválené</span><span class="stat-value">${data.ridici.filter((r) => r.faktura).length} / ${data.ridici.length}</span></div>` : ""}`;
   box.appendChild(stats);
+  if (data.pozdni && data.pozdni.sleduje) box.appendChild(lateSection(data));
   if (data.ridici.length) box.appendChild(payTable("Řidiči OSVČ", data.ridici, true, data.pronajemVozidla, data));
   if (data.brigadnici.length) box.appendChild(payTable("Brigádníci", data.brigadnici, false, 0, data));
 }
 const FINE_REASONS = ["Pozdní příchod", "Chybějící předávka auta", "Neomluvená absence", "Poškození auta", "Chyba v objednávce"];
 // Pokuta (srážka) nebo bonus → rovnou do šichtovnice, projeví se ve fakturaci za zvolený měsíc
-function finePopover(anchor, data, courierId) {
+function finePopover(anchor, data, courierId, presetReason) {
   const people = new Map((data.kuryri || []).map((k) => [String(k.id), k.name]));
   [...data.ridici, ...data.brigadnici].forEach((r) => { if (!people.has(String(r.courierId))) people.set(String(r.courierId), r.name); });
   const opts = [...people.entries()].sort((a, b) => a[1].localeCompare(b[1], "cs"))
@@ -905,7 +924,7 @@ function finePopover(anchor, data, courierId) {
     <input class="pop-input fine-reason" maxlength="300" placeholder="Za co?">
     <div class="fine-quick">${FINE_REASONS.map((r) => `<button type="button" class="chip-btn">${escapeHtml(r)}</button>`).join("")}</div>
     <p class="muted-sm fine-note">Zapíše se do šichtovnice za ${escapeHtml(monthLabel)} a hned se odečte z výplaty.</p>`;
-  const reason = body.querySelector(".fine-reason");
+  const reason = body.querySelector(".fine-reason"); if (presetReason) reason.value = presetReason;
   body.querySelectorAll(".fine-quick .chip-btn").forEach((b) => b.onclick = () => { reason.value = b.textContent; reason.focus(); });
   const btn = document.createElement("button"); btn.className = "pop-btn"; btn.textContent = "Zapsat pokutu";
   body.querySelectorAll("input[name=fineKind]").forEach((r) => r.onchange = () => {
@@ -931,6 +950,29 @@ function finePopover(anchor, data, courierId) {
   body.appendChild(btn);
   popover(anchor, "Pokuta / bonus", body);
   body.querySelector(courierId ? ".fine-amount" : ".fine-courier").focus();
+}
+// Pozdní příchody za měsíc (ranní/celodenní směna bez předávky do uzávěrky) → podklad pro pokuty
+const dm = (iso) => { const [, m, d] = iso.split("-"); return `${Number(d)}. ${Number(m)}.`; };
+function lateSection(data) {
+  const p = data.pozdni; const sec = document.createElement("section"); sec.className = "pay-section late";
+  const byCourier = new Map();
+  p.prichody.forEach((x) => { if (!byCourier.has(x.courierId)) byCourier.set(x.courierId, { name: x.name, items: [] }); byCourier.get(x.courierId).items.push(x); });
+  const groups = [...byCourier.entries()].sort((a, b) => b[1].items.length - a[1].items.length || a[1].name.localeCompare(b[1].name, "cs"));
+  sec.innerHTML = `<h3 class="pay-title">Pozdní příchody <span class="section-count">${p.prichody.length}</span> <span class="muted-sm">ranní a celodenní směny bez předávky auta do ${escapeHtml(p.deadline)}${p.od && p.od > `${intYM.y}-${String(intYM.m).padStart(2, "0")}-01` ? ` · sleduje se od ${escapeHtml(dm(p.od))}` : ""}</span></h3>`;
+  if (!groups.length) { sec.insertAdjacentHTML("beforeend", `<div class="int-empty small">${p.od ? "V tomhle měsíci nikdo nepřišel pozdě." : "Předávky se v tomhle městě zatím neodesílají."}</div>`); return sec; }
+  const ul = document.createElement("ul"); ul.className = "late-list";
+  groups.forEach(([cid, g]) => {
+    const li = document.createElement("li");
+    const days = g.items.map((x) => `<span class="chip ${x.predavka ? "warn" : "danger"}" title="${x.shift === "fullday" ? "Celodenní" : "Ranní"} směna">${escapeHtml(dm(x.datum))} ${x.predavka ? "předávka " + escapeHtml(x.predavka) : "bez předávky"}</span>`).join("");
+    li.innerHTML = `<div class="late-who"><span class="pay-name">${escapeHtml(g.name)}</span><span class="muted-sm">${g.items.length}× pozdě</span></div><div class="late-days">${days}</div>`;
+    if (data.canFine) {
+      const btn = document.createElement("button"); btn.className = "pill-btn late-fine"; btn.textContent = "Pokuta";
+      btn.onclick = (e) => finePopover(e.currentTarget, data, cid, `Pozdní příchod ${g.items.map((x) => dm(x.datum)).join(", ")}`);
+      li.appendChild(btn);
+    }
+    ul.appendChild(li);
+  });
+  sec.appendChild(ul); return sec;
 }
 async function deleteBonusItem(id) {
   const b = getBoard(); if (!b) return;
@@ -973,7 +1015,10 @@ function payTable(title, rows, ridic, pronajem, data) {
   const tb = document.createElement("tbody");
   rows.slice().sort((a, b) => a.name.localeCompare(b.name, "cs")).forEach((r) => {
     const tr = document.createElement("tr"); tr.className = "pay-row"; tr.tabIndex = 0;
-    tr.innerHTML = `<td><span class="pay-name">${escapeHtml(r.name)}</span>${r.cities && r.cities.length > 1 ? `<span class="muted-sm"> · ${r.cities.length} města</span>` : ""}</td>
+    const fakChip = !ridic || !data || !data.fakturyNactene ? ""
+      : r.faktura ? ` <span class="chip ${r.faktura.zaplaceno ? "ok" : "accent"}">${r.faktura.zaplaceno ? "Faktura zaplacena" : "Faktura schválena"}</span>`
+      : data.mesicSkoncil ? ` <span class="chip warn">Bez faktury</span>` : "";
+    tr.innerHTML = `<td><span class="pay-name">${escapeHtml(r.name)}</span>${r.cities && r.cities.length > 1 ? `<span class="muted-sm"> · ${r.cities.length} města</span>` : ""}${fakChip}</td>
       <td class="num mono">${num(ridic ? r.totalShifts : r.totalHours)}</td><td class="num mono">${czk(r.rate)}</td><td class="num mono">${czk(r.celkem)}</td>
       <td class="num mono">${r.zaloha ? money(-r.zaloha) : "—"}</td><td class="num mono">${r.orderBonus ? money(r.orderBonus, true) : "—"}</td>
       <td class="num mono">${r.manualBonus ? money(r.manualBonus, true) : "—"}</td><td class="num mono strong">${money(r.toPay)}</td>`;
@@ -990,6 +1035,9 @@ function payTable(title, rows, ridic, pronajem, data) {
         ${r.manualBonus ? `<div><span>Bonusy a srážky</span><span class="mono">${money(r.manualBonus, true)}</span></div>` : ""}
       </div>
       <div><span class="pf-label">Směny</span> ${shifts}</div>
+      ${ridic && data && data.fakturyNactene ? `<div><span class="pf-label">Faktura</span> ${r.faktura
+        ? `č. ${escapeHtml(r.faktura.cislo)} · ${czk(r.faktura.castka)} · schválil ${escapeHtml(fmtDate(r.faktura.schvaleno))}${r.faktura.zaplaceno ? " · zaplaceno" : ""}${r.faktura.pdf ? ` · <a href="/api/integrace/board/${getBoard().id}/faktury/${r.faktura.id}/pdf?year=${intYM.y}&month=${intYM.m}" target="_blank" rel="noopener">PDF</a>` : ""}`
+        : `<span class="muted-sm">${data.mesicSkoncil ? "kurýr ji v Moje data zatím neschválil" : "měsíc ještě běží"}</span>`}</div>` : ""}
       <div><span class="pf-label">Bonusy a srážky</span>${items ? `<ul class="bonus-list">${items}</ul>` : ` <span class="muted-sm">žádné</span>`}</div>
       ${data && data.canFine ? `<div><button class="pill-btn fine-add">${icon("plus", 16)}<span>Pokuta / bonus pro ${escapeHtml(r.name)}</span></button></div>` : ""}
       ${ridic && pronajem ? `<div class="muted-sm">Pronájem vozidla ${czk(pronajem)} je samostatná položka na faktuře – v částce k výplatě není.</div>` : ""}

@@ -1243,3 +1243,30 @@ a.person-phone:hover { color: var(--accent); }
   .receipt-actions { grid-column: 1 / -1; }
   .receipt-actions .primary-btn { margin-left: auto; }
 }
+
+/* Hodnocení z Foodisu */
+.chip-sub { opacity: .7; margin-left: 3px; }
+.rating-head { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+.rating-avg { font-family: var(--mono); font-size: 26px; font-weight: 700; padding: 4px 10px; border-radius: 10px; }
+.rating-avg.ok { background: var(--ok-soft); color: var(--ok); }
+.rating-avg.warn { background: var(--warn-soft); color: var(--warn); }
+.rating-avg.danger { background: var(--danger-soft); color: var(--danger); }
+.rating-stars { color: #E8A317; letter-spacing: 1px; font-size: 16px; }
+.rating-stars.sm { font-size: 13px; }
+.review-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; max-height: 340px; overflow-y: auto; }
+.review-list li { padding: 8px 10px; border-radius: 9px; background: var(--subtle); font-size: 13px; }
+.review-list li.bad { background: var(--danger-soft); }
+.review-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.review-text { margin-top: 4px; color: var(--text); }
+
+/* Pozdní příchody */
+.late-list { list-style: none; margin: 0; padding: 0; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; }
+.late-list li { display: grid; grid-template-columns: minmax(150px, 220px) 1fr auto; align-items: center; gap: 12px; padding: 10px 14px; border-top: 1px solid var(--border); }
+.late-list li:first-child { border-top: none; }
+.late-who { display: flex; flex-direction: column; gap: 2px; }
+.late-days { display: flex; flex-wrap: wrap; gap: 6px; }
+.late-fine { height: 32px; }
+@media (max-width: 640px) {
+  .late-list li { grid-template-columns: 1fr auto; }
+  .late-days { grid-column: 1 / -1; grid-row: 2; }
+}

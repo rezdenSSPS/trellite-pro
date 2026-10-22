@@ -61,6 +61,13 @@ Záložky navíc:
   zobrazený měsíc rovnou do šichtovnice (stejná tabulka jako stránka
   Bonus/Srážka), takže se hned promítne do fakturace. Přidat smí každý, kdo vidí
   Výplaty města; smazat jen autor nebo admin a jen položky přidané z Trella.
+- **Výplaty → Pozdní příchody** – za měsíc všechny ranní a celodenní směny, ke
+  kterým kurýr neodeslal předávku auta do `PREDAVKA_DEADLINE` (nebo vůbec);
+  tlačítko „Pokuta“ předvyplní kurýra i dny.
+- **Výplaty → faktury OSVČ** – u řidiče je vidět, jestli už fakturu za měsíc
+  schválil v Moje data (číslo, částka, zaplaceno; PDF jen pro admina).
+- **Řidiči → hodnocení z Foodisu** – hvězdičky na kartě kurýra, v detailu
+  průměr a posledních 15 recenzí.
 - **Výplaty → Účtenky ke schválení** – účtenky, které kurýři nahráli v Moje data;
   admin je může prohlédnout (fotka) a schválit / zamítnout.
 
