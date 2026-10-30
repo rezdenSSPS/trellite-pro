@@ -139,6 +139,7 @@ function connectSSE() {
       // změna u aut ve šichtovnici (mechanik si vzal závadu, poznámka, servis…)
       if (d.kind === "vozidla") { refreshFleet(); return; }
       if (d.kind === "lide") { refreshPeople(); return; }
+      if (d.kind === "inventory") refreshPeople(); // + stav skladu níže
       if (d.kind === "vyplaty") { refreshPayroll(); return; }
       clearTimeout(refetchTimer); refetchTimer = setTimeout(refetchState, 180);
     };
@@ -663,7 +664,8 @@ function personCardEl(p, links) {
   const chips = [];
   if (isPending(p)) chips.push(`<span class="chip warn">Čeká na podpis</span>`);
   if (p.contract) chips.push(`<span class="chip">${escapeHtml(CONTRACT_LABEL[p.contract.type] || "Smlouva")}</span>`);
-  if (p.clothing && !isPending(p)) chips.push(p.clothing.signedAt ? `<span class="chip ok">Oblečení převzato</span>` : `<span class="chip warn">Oblečení nepřevzato</span>`);
+  if (p.clothing && !isPending(p)) chips.push(p.clothing.signedAt ? `<span class="chip ok">Oblečení převzato</span>`
+    : p.clothing.handedOverAt ? `<span class="chip warn">Oblečení čeká na podpis</span>` : `<span class="chip warn">Oblečení nepředáno</span>`);
   if (p.test) chips.push(`<span class="chip ${testClass(p.test.percent)}">Test ${p.test.percent} %${p.test.percent < TEST_PASS ? " · Neprošel" : ""}</span>`);
   if (p.clothingSize) chips.push(`<span class="chip">Vel. ${escapeHtml(p.clothingSize)}</span>`);
   if (p.inventory && p.inventory.total) chips.push(`<span class="chip">Má ${p.inventory.total} ks oblečení</span>`);
@@ -699,12 +701,7 @@ function openPerson(p, links) {
       + (p.contract.hasPdf ? `<a class="primary-btn person-pdf" href="/api/integrace/smlouva/${encodeURIComponent(p.contract.id)}" target="_blank" rel="noopener">${icon("download", 16)}<span>Stáhnout smlouvu (PDF)</span></a>` : "");
     if (p.contract.link) contract += `<div class="nc-link"><span class="pf-label">Odkaz pro kurýra</span><input class="pop-input mono" readonly value="${escapeHtml(p.contract.link)}"><div class="nc-link-actions"><button type="button" class="pill-btn" data-copy="${escapeHtml(p.contract.link)}">Kopírovat odkaz</button></div></div>`;
   } else contract = `<p class="empty-note">Ke smlouvě se nepodařilo dohledat záznam v podpisech.</p>`;
-  const clothing = p.clothing ? field("Dostane", escapeHtml(p.clothing.items.map((i) => `${i.count}× ${i.label}`).join(", ")))
-    + field("Velikost", escapeHtml(p.clothing.size || "—"))
-    + field("Převzetí", p.clothing.signedAt ? "Potvrzeno podpisem " + escapeHtml(fmtDate(p.clothing.signedAt)) : (isPending(p) ? "Až po podpisu smluv" : "Kurýr ještě nepotvrdil")) : "";
-  const owns = p.inventory && (p.inventory.items || []).length
-    ? p.inventory.items.map((i) => field(escapeHtml(i.label), escapeHtml(i.count + "× vel. " + i.size))).join("") + field("Celkem", escapeHtml(p.inventory.total + " ks"))
-    : "";
+  const clothing = personClothingHtml(p, field);
 
   let test = "";
   if (p.test) {
@@ -728,12 +725,128 @@ function openPerson(p, links) {
     ${p.phone || p.email ? `<div class="person-quick">${p.phone ? `<a class="pq main" href="tel:${escapeHtml(p.phone.replace(/\s+/g, ""))}">${icon("phone", 20)}<span>Zavolat</span></a><a class="pq" href="sms:${escapeHtml(p.phone.replace(/\s+/g, ""))}">${icon("message", 20)}<span>SMS</span></a>` : ""}${p.email ? `<a class="pq" href="mailto:${escapeHtml(p.email)}">${icon("mail", 20)}<span>E-mail</span></a>` : ""}</div>` : ""}
     <div class="person-grid">
       <div>${sec("Kontakt", contact)}${sec("Práce", work)}${sec("Fakturace a platby", billing)}</div>
-      <div>${p.smenovnikId ? `<section class="person-sec person-rating"><h3>Hodnocení z Foodisu</h3><div class="rating-body muted-sm">Načítám…</div></section>` : ""}${sec("Smlouva", contract)}${sec("Pracovní oblečení", clothing)}${sec("Oblečení (co má)", owns)}${sec("Vstupní test", test)}</div>
+      <div>${p.smenovnikId ? `<section class="person-sec person-rating"><h3>Hodnocení z Foodisu</h3><div class="rating-body muted-sm">Načítám…</div></section>` : ""}${sec("Smlouva", contract)}${sec("Oblečení", clothing)}${sec("Vstupní test", test)}</div>
     </div>
     ${linkBtns.length ? `<div class="person-links">${linkBtns.join("")}</div>` : ""}`;
   bindCopyButtons(body);
+  bindPersonClothing(body, p, links);
   el("personOverlay").hidden = false;
   if (p.smenovnikId) loadPersonRating(p, body.querySelector(".rating-body"));
+}
+/* ---------- Oblečení na kartě člověka ----------
+   Každý má záznam „co má" (kniha pohybů v Trellu). U nového kurýra z Podpisů
+   navíc dvě fáze: „Oblečení předáno" (kusy + velikosti) → kurýr na odkazu
+   podepíše převzetí → Trello to samo odečte ze skladu. */
+function personClothingHtml(p, field) {
+  const inv = (state && state.inventory) || { items: [], sizes: [], stock: {} };
+  const owns = p.inventory && (p.inventory.items || []).length
+    ? p.inventory.items.map((i) => field(escapeHtml(i.label), escapeHtml(i.count + "× vel. " + i.size))).join("") + field("Celkem", escapeHtml(p.inventory.total + " ks"))
+    : `<p class="empty-note">Zatím nemá zapsané žádné oblečení.</p>`;
+  const c = p.clothing;
+  const line = (items) => (items || []).filter((i) => i.count > 0).map((i) => `${i.count}× ${i.label}${i.size ? " " + i.size : ""}`).join(", ");
+  let status = "";
+  if (c && c.signedAt) status = `<div class="pc-status ok">${icon("check", 14)}<span>Převzetí podepsal ${escapeHtml(fmtDate(c.signedAt))}: ${escapeHtml(line(c.items))}${c.handedOverAt ? " · odečteno ze skladu" : ""}</span></div>`;
+  else if (c && c.handedOverAt) status = `<div class="pc-status warn"><span>Předáno ${escapeHtml(fmtDate(c.handedOverAt))}: ${escapeHtml(line(c.items))}. Čeká na podpis kurýra; ze skladu se odečte po podpisu.</span></div>`;
+  else if (isPending(p)) status = `<div class="pc-status"><span>${p.clothingPlanned && line(p.clothingPlanned) ? "Plánováno: " + escapeHtml(line(p.clothingPlanned)) + ". " : ""}Oblečení jde předat až po podpisu smluv.</span></div>`;
+  else if (p.canHandOver && p.clothingPlanned && line(p.clothingPlanned)) status = `<div class="pc-status"><span>Plánováno: ${escapeHtml(line(p.clothingPlanned))}. Až mu oblečení dáš, klikni na „Oblečení předáno".</span></div>`;
+
+  const btns = [];
+  if (p.canHandOver && p.clothingRecordId) btns.push(`<button type="button" class="primary-btn sm" data-pc="handover">${c && c.handedOverAt && !c.signedAt ? "Opravit předávku" : "Oblečení předáno"}</button>`);
+  if (isAdmin()) btns.push(`<button type="button" class="pill-btn" data-pc="manual">Ruční výdej / vrácení</button>`);
+  return `<div class="pc-owns">${owns}</div>${status}${btns.length ? `<div class="pc-actions">${btns.join("")}</div>` : ""}<div class="pc-form" hidden></div>`;
+}
+function bindPersonClothing(body, p, links) {
+  const box = body.querySelector(".pc-form"); if (!box) return;
+  const inv = (state && state.inventory) || { items: [], sizes: [], stock: {} };
+  const sizes = inv.sizes || [];
+  const stockOf = (item, size) => (inv.stock || {})[item + "|" + size] || 0;
+  const sizeSel = (name, val) => `<select name="${name}"><option value="">vel.</option>${sizes.map((s) => `<option${s === val ? " selected" : ""}>${s}</option>`).join("")}</select>`;
+  // Po změně: znovu načíst Lidi (čerstvě z Podpisů) a otevřít detail s novými čísly.
+  const reopen = async () => {
+    const b = getBoard(); let np = null;
+    if (b) {
+      try {
+        const j = await intGet(`/board/${b.id}/lide?refresh=1`);
+        intData[`${b.id}:lide`] = { data: j };
+        if (viewMode === "board" && boardTab === "lide") renderIntTab();
+        np = (j.people || []).find((x) => x.key === p.key || x.name === p.name);
+      } catch (e) { if (e.unauth) return; }
+    }
+    if (!el("personOverlay").hidden) openPerson(np || p, links);
+  };
+
+  const hb = body.querySelector("[data-pc=handover]");
+  if (hb) hb.onclick = () => {
+    const c = p.clothing;
+    const handed = c && c.handedOverAt && !c.signedAt;
+    const planned = Object.fromEntries((p.clothingPlanned || []).map((i) => [i.id, i.count]));
+    const cur = handed ? Object.fromEntries((c.items || []).map((i) => [i.id, i])) : {};
+    box.hidden = false;
+    box.innerHTML = `<form class="pc-handover" autocomplete="off">
+      <p class="muted-sm">Zadej, co mu opravdu dáváš. Kurýrovi se na jeho odkazu odemkne podpis převzetí; po podpisu se kusy samy odečtou ze skladu.</p>
+      ${(inv.items || []).map((it) => {
+        const count = handed ? ((cur[it.id] || {}).count || 0) : (planned[it.id] || 0);
+        const size = handed ? ((cur[it.id] || {}).size || "") : (p.clothingSize || "");
+        return `<div class="pc-row" data-item="${it.id}"><span class="pc-label">${escapeHtml(it.label)}</span>
+          <input type="number" name="count" min="0" max="20" value="${count}" inputmode="numeric" aria-label="${escapeHtml(it.label)} – počet">
+          ${sizeSel("size", size)}<span class="pc-stock muted-sm"></span></div>`;
+      }).join("")}
+      <div class="pc-actions"><button type="submit" class="primary-btn sm">Uložit předávku</button><button type="button" class="pill-btn" data-cancel>Zrušit</button></div>
+    </form>`;
+    const f = box.querySelector("form");
+    const upd = () => f.querySelectorAll(".pc-row").forEach((r) => {
+      const n = parseInt(r.querySelector("[name=count]").value, 10) || 0, sz = r.querySelector("[name=size]").value, el2 = r.querySelector(".pc-stock");
+      if (!sz) { el2.textContent = ""; return; }
+      const st = stockOf(r.dataset.item, sz);
+      el2.textContent = `skladem ${st}`; el2.classList.toggle("neg", n > st);
+    });
+    f.oninput = upd; upd();
+    f.querySelector("[data-cancel]").onclick = () => { box.hidden = true; box.innerHTML = ""; };
+    f.onsubmit = async (e) => {
+      e.preventDefault();
+      const items = {};
+      for (const r of f.querySelectorAll(".pc-row")) {
+        const n = parseInt(r.querySelector("[name=count]").value, 10) || 0, sz = r.querySelector("[name=size]").value;
+        if (!n) continue;
+        if (!sz) { toast("Vyber velikost u položky " + r.querySelector(".pc-label").textContent + "."); return; }
+        items[r.dataset.item] = { count: n, size: sz };
+      }
+      if (!Object.keys(items).length) { toast("Zadej aspoň jeden kus."); return; }
+      const btn = f.querySelector("[type=submit]"); btn.disabled = true;
+      try {
+        await intSend("POST", "/obleceni/" + encodeURIComponent(p.clothingRecordId), { items });
+        toast("Předávka uložena. Kurýr teď na odkazu podepíše převzetí.");
+        await reopen();
+      } catch (err) { btn.disabled = false; if (!err.unauth) toast(err.message); }
+    };
+  };
+
+  const mb = body.querySelector("[data-pc=manual]");
+  if (mb) mb.onclick = () => {
+    box.hidden = false;
+    box.innerHTML = `<form class="inv-form pc-manual" autocomplete="off">
+      <select name="dir"><option value="out">Výdej (dostal)</option><option value="in">Vrácení na sklad</option></select>
+      <select name="item">${(inv.items || []).map((i) => `<option value="${i.id}">${escapeHtml(i.label)}</option>`).join("")}</select>
+      ${sizeSel("size", p.clothingSize || "")}
+      <input name="qty" type="number" min="1" max="999" value="1" inputmode="numeric" aria-label="Počet kusů">
+      <input name="note" placeholder="Poznámka (nepovinné)" aria-label="Poznámka">
+      <button type="submit" class="primary-btn sm">Zapsat</button><button type="button" class="pill-btn" data-cancel>Zrušit</button>
+    </form>`;
+    const f = box.querySelector("form");
+    f.querySelector("[data-cancel]").onclick = () => { box.hidden = true; box.innerHTML = ""; };
+    f.onsubmit = async (e) => {
+      e.preventDefault();
+      const size = f.querySelector("[name=size]").value;
+      if (!size) { toast("Vyber velikost."); return; }
+      const b = { dir: f.querySelector("[name=dir]").value, item: f.querySelector("[name=item]").value, size,
+        qty: f.querySelector("[name=qty]").value, personName: p.name, note: f.querySelector("[name=note]").value.trim() };
+      try {
+        applyPayload(await api("POST", "/inventory/move", b));
+        toast(b.dir === "out" ? "Výdej zapsán." : "Vrácení zapsáno.");
+        await reopen();
+      } catch (err) { if (!err.unauth) toast(errMsg(err && err.error) || "Nepodařilo se zapsat."); }
+    };
+  };
 }
 async function loadPersonRating(p, box) {
   const b = getBoard(); if (!b || !box) return;
@@ -1780,6 +1893,7 @@ function renderFilterDrawer(bodyEl, titleEl, board) {
 /* ============================================================
    Inventura — sklad pracovního oblečení
    ============================================================ */
+let invCounting = false;
 function showInventory() {
   viewMode = "inventory"; hideIntegration();
   el("boardsView").hidden = true; el("boardView").hidden = true; el("adminView").hidden = true; el("inventoryView").hidden = false;
@@ -1799,10 +1913,12 @@ function renderInventory() {
   const sizes = inv.sizes || [];
   const stockEmpty = !Object.values(inv.stock || {}).some((n) => n !== 0);
 
+  const counting = admin && invCounting;
   const stockRows = (inv.items || []).map((it) => {
     const cells = sizes.map((s) => {
       const n = (inv.stock || {})[it.id + "|" + s] || 0;
       const cls = n < 0 ? "neg" : n > 0 ? "pos" : "zero";
+      if (counting) return `<td class="inv-cell"><input class="inv-count" type="number" min="0" inputmode="numeric" data-k="${it.id}|${s}" placeholder="${n}" aria-label="${escapeHtml(it.label)} ${s}"></td>`;
       return `<td class="inv-cell ${cls}">${n}</td>`;
     }).join("");
     return `<tr><th class="inv-row-h">${escapeHtml(it.label)}</th>${cells}</tr>`;
@@ -1816,9 +1932,17 @@ function renderInventory() {
       <span class="inv-person-items">${escapeHtml(invLine(inv, p.items))}</span></span>
     </div>`).join("") : `<div class="int-empty small">Zatím nikdo nemá zapsané oblečení.</div>`;
 
+  const pending = inv.pending || [];
+  const pendingHtml = pending.length ? pending.map((p) => `
+    <div class="inv-person">
+      <span class="avatar sm" style="background:${tint(colorFor(p.name), 0.82)};color:${shade(colorFor(p.name), 0.45)}">${escapeHtml(initials(p.name))}</span>
+      <span class="inv-person-main"><span class="inv-person-name">${escapeHtml(p.name)}</span>
+      <span class="inv-person-items">${escapeHtml(invLine(inv, p.items))} · předáno ${escapeHtml(fmtDate(p.handedOverAt))}</span></span>
+    </div>`).join("") : "";
+
   const ledger = inv.ledger || [];
   const ledgerHtml = ledger.length ? ledger.slice(0, 40).map((m) => {
-    const kind = m.source === "init" ? "úvodní stav" : m.source === "podpisy" ? "podpis dohody" : (m.dir === "in" ? "příjem" : "výdej");
+    const kind = m.source === "init" ? "úvodní stav" : m.source === "podpisy" ? "podpis převzetí" : m.source === "stocktake" ? "inventura" : (m.dir === "in" ? "příjem" : "výdej");
     const dirCls = m.dir === "in" ? "in" : "out";
     const who = m.personName ? ` · ${escapeHtml(m.personName)}` : "";
     const note = m.note ? ` · ${escapeHtml(m.note)}` : "";
@@ -1855,8 +1979,10 @@ function renderInventory() {
   box.innerHTML = `
     <div class="inv-wrap">
       <section class="inv-sec">
-        <div class="inv-head"><h3>Sklad</h3></div>
-        ${adminForm}
+        <div class="inv-head"><h3>Sklad</h3>${admin ? (counting
+          ? `<span class="inv-head-actions"><button type="button" class="primary-btn sm" id="invCountSave">Uložit inventuru</button><button type="button" class="pill-btn" id="invCountCancel">Zrušit</button></span>`
+          : `<button type="button" class="pill-btn" id="invCountBtn">Zadat inventuru</button>`) : ""}</div>
+        ${counting ? `<p class="inv-note muted-sm">Zapiš, kolik kusů na skladě opravdu je. Prázdná políčka zůstanou, jak jsou (šedé číslo = současná evidence). Rozdíl se zapíše jako pohyb „inventura".</p>` : adminForm}
         <div class="inv-stock-wrap"><table class="inv-stock">
           <thead><tr><th></th>${sizes.map((s) => `<th>${s}</th>`).join("")}</tr></thead>
           <tbody>${stockRows}</tbody>
@@ -1864,6 +1990,11 @@ function renderInventory() {
         ${stockEmpty ? `<p class="inv-note muted-sm">Sklad je zatím prázdný. Zadej příjem (nákup), nebo sklad zatím neřeš — přehled „kdo co má" funguje i bez něj.</p>` : ""}
         ${importHtml}
       </section>
+      ${pending.length ? `<section class="inv-sec">
+        <h3>Předáno, čeká na podpis <span class="section-count">${pending.length}</span></h3>
+        <p class="muted-sm">Ze skladu se odečte samo, až kurýr na svém odkazu převzetí podepíše.</p>
+        <div class="inv-people">${pendingHtml}</div>
+      </section>` : ""}
       <section class="inv-sec">
         <h3>Kdo co má <span class="section-count">${people.length}</span></h3>
         <div class="inv-people">${peopleHtml}</div>
@@ -1891,6 +2022,17 @@ function renderInventory() {
     if (!confirm("Smazat tento pohyb?")) return;
     try { applyPayload(await api("DELETE", "/inventory/move/" + b.dataset.del)); } catch (e) { toast("Nepodařilo se smazat."); }
   });
+  const cb = box.querySelector("#invCountBtn"); if (cb) cb.onclick = () => { invCounting = true; renderInventory(); };
+  const cc = box.querySelector("#invCountCancel"); if (cc) cc.onclick = () => { invCounting = false; renderInventory(); };
+  const cs = box.querySelector("#invCountSave");
+  if (cs) cs.onclick = async () => {
+    const counts = {};
+    box.querySelectorAll(".inv-count").forEach((i) => { if (i.value.trim() !== "") counts[i.dataset.k] = i.value.trim(); });
+    if (!Object.keys(counts).length) { toast("Nezadal jsi žádné počty."); return; }
+    cs.disabled = true;
+    try { const j = await api("POST", "/inventory/stocktake", { counts }); invCounting = false; applyPayload(j); toast(`Inventura uložena (${(j.stocktake || {}).moves || 0} oprav).`); }
+    catch (e) { cs.disabled = false; toast(errMsg(e && e.error) || "Inventuru se nepodařilo uložit."); }
+  };
   const imp = box.querySelector("#invImportBtn");
   if (imp) imp.onclick = async () => {
     const ta = box.querySelector(".inv-csv"); const csv = (ta.value || "").trim();

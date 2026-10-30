@@ -581,6 +581,21 @@ button, input, textarea, select { font-family: inherit; }
 .inv-cell.pos { font-weight: 650; }
 .inv-cell.neg { color: #c15f5b; font-weight: 650; }
 .inv-note { margin: 12px 0 0; }
+.inv-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.inv-head-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.inv-count { width: 56px; height: 32px; text-align: center; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--bg); color: var(--text); font: inherit; }
+/* Oblečení na kartě člověka */
+.pc-status { display: flex; gap: 6px; align-items: flex-start; font-size: 13px; margin: 10px 0 0; padding: 8px 10px; border-radius: 8px; background: var(--subtle); color: var(--text); }
+.pc-status.ok { background: var(--ok-soft); color: var(--ok); }
+.pc-status.warn { background: var(--warn-soft); color: var(--warn); }
+.pc-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+.pc-form { margin-top: 12px; }
+.pc-form .inv-form { margin-bottom: 0; }
+.pc-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+.pc-label { flex: 0 0 64px; font-size: 14px; font-weight: 500; }
+.pc-row input, .pc-row select { height: 34px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--bg); color: var(--text); padding: 0 8px; font-size: 14px; }
+.pc-row input { width: 64px; text-align: center; }
+.pc-stock.neg { color: var(--danger); font-weight: 600; }
 .inv-import { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 14px; }
 .inv-import summary { cursor: pointer; font-weight: 600; font-size: 14px; }
 .inv-import .inv-csv { width: 100%; margin: 10px 0; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--bg); color: var(--text); padding: 8px 10px; font-family: ui-monospace, monospace; font-size: 12px; resize: vertical; }

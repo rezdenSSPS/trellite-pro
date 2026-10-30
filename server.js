@@ -66,6 +66,7 @@ async function loadDoc() {
   if (!d.meta.jwtSecret) { d.meta.jwtSecret = crypto.randomBytes(32).toString("hex"); await storage.set(d); }
   if (!d.meta.vapid && !process.env.VAPID_PUBLIC_KEY) { d.meta.vapid = webpush.generateVAPIDKeys(); await storage.set(d); }
   if (!d.inventory || !Array.isArray(d.inventory.ledger)) d.inventory = { ledger: [], applied: {} };
+  if (!d.inventory.applied || typeof d.inventory.applied !== "object") d.inventory.applied = {};
   DOC = d;
   setupPush();
 }
@@ -238,8 +239,11 @@ function filterStateFor(u) {
    Zdroj pravdy je tady v Trellu: kniha pohybů (ledger). Stav skladu
    se počítá z pohybů — počítané příjmy (+) minus počítané výdeje (−).
    Pohyb „init" z úvodního importu (co kdo už má) se započítá u osoby,
-   ale do skladu NE (sklad se rozjede až se zadanými nákupy). Výdej při
-   podpisu dohody v Podpisech (fáze 2) se zapíše jako počítaný výdej.
+   ale do skladu NE (sklad se rozjede až se zadanými nákupy).
+   Nový kurýr (dvě fáze v Podpisech): po podpisu smluv admin klikne
+   „Oblečení předáno" (počty + velikost u každého kusu), kurýr na svém odkazu
+   podepíše převzetí a Trello to pak samo zapíše jako počítaný výdej
+   (source „podpisy") — každý záznam jen jednou (inventory.applied).
    ============================================================ */
 const INV_ITEMS = [
   { id: "tricko", label: "Tričko" },
@@ -300,8 +304,47 @@ function inventoryState() {
   })).filter((p) => p.items.length).sort((a, b) => a.name.localeCompare(b.name, "cs"));
   return {
     items: INV_ITEMS, sizes: INV_SIZES, stock, people,
+    pending: invPending.list, syncedAt: invPending.at,
     ledger: (DOC.inventory.ledger || []).slice(-300).reverse(),
   };
+}
+
+/* Napojení na Podpisy: záznamy s podepsaným převzetím oblečení (po předávce)
+   se odečtou ze skladu. Předané, ale zatím nepodepsané se jen ukazují jako
+   „čeká na podpis". Staré záznamy bez předávky (z doby před dvoufázovým
+   převzetím) se neodečítají — jejich stav přišel úvodním importem. */
+let invPending = { list: [], at: null };
+function applyPodpisyClothing(records) {
+  const inv = DOC.inventory;
+  let changed = false;
+  const pending = [];
+  for (const r of records || []) {
+    const c = r && r.clothing;
+    if (!c || !c.handedOverAt) continue;
+    const items = (c.items || []).filter((i) => invItem(i.id) && INV_SIZES.includes(String(i.size || "").toUpperCase()) && Number(i.count) > 0);
+    if (!c.signedAt) { pending.push({ id: r.id, name: r.name, handedOverAt: c.handedOverAt, items: items.map((i) => ({ item: i.id, size: String(i.size).toUpperCase(), count: Number(i.count) })) }); continue; }
+    if (inv.applied[r.id]) continue;
+    const ts = Date.parse(c.signedAt) || Date.now();
+    for (const i of items) {
+      inv.ledger.push({
+        id: uid(), ts, item: i.id, size: String(i.size).toUpperCase(), qty: Math.min(999, Number(i.count)), dir: "out", counted: true,
+        personKey: nameKey(r.name), personName: r.name, source: "podpisy", podpisyId: r.id, note: "Převzetí podepsáno v Podpisech", by: null,
+      });
+    }
+    inv.applied[r.id] = Date.now();
+    changed = true;
+  }
+  pending.sort((a, b) => String(b.handedOverAt).localeCompare(String(a.handedOverAt)));
+  const pendingChanged = JSON.stringify(pending) !== JSON.stringify(invPending.list);
+  invPending = { list: pending, at: Date.now() };
+  if (changed) persist();
+  if (changed || pendingChanged) broadcast(null, "inventory");
+  return changed;
+}
+async function syncPodpisyClothing() {
+  if (!intEnabled("podpisy")) return;
+  try { applyPodpisyClothing(await upstream("podpisy", "/kuryri", { fresh: true })); }
+  catch (e) { console.error("sync oblečení z podpisů:", e.message); }
 }
 
 // Mapování názvu v hranaté závorce hlavičky CSV → id položky.
@@ -791,6 +834,7 @@ app.get("/api/integrace/board/:boardId/lide", requireAuth, async (req, res) => {
   const ratings = hod.status === "fulfilled" ? hod.value : {};
   const couriers = kur.status === "fulfilled" ? kur.value : [];
   const records = sml.status === "fulfilled" ? sml.value : [];
+  if (sml.status === "fulfilled") applyPodpisyClothing(records);
 
   const people = couriers.map((c) => ({
     key: "s:" + c.id, smenovnikId: c.id, name: (c.fakturace_name || "").trim() || c.name, shortName: c.name,
@@ -815,7 +859,13 @@ app.get("/api/integrace/board/:boardId/lide", requireAuth, async (req, res) => {
     const contract = signed.find((r) => r.hasPdf) || signed[0] || p.records[0] || null;
     const withTest = p.records.find((r) => r.test);
     p.contract = contract ? { id: contract.id, type: contract.contractType, signedAt: contract.signedAt, status: contract.status, hasPdf: contract.hasPdf, link: contract.status === "signed" ? null : contract.link } : null;
-    p.clothing = (p.records.find((r) => r.clothing) || {}).clothing || null;
+    // Záznam, ke kterému patří oblečení: rozjetá předávka > lze předat > s plánem
+    const clothRec = p.records.find((r) => r.clothing && r.clothing.handedOverAt && !r.clothing.signedAt)
+      || p.records.find((r) => r.canHandOver) || p.records.find((r) => r.clothing) || null;
+    p.clothing = clothRec ? clothRec.clothing : null;
+    p.clothingRecordId = clothRec ? clothRec.id : null;
+    p.canHandOver = !!(clothRec && clothRec.canHandOver);
+    p.clothingPlanned = clothRec && clothRec.clothingPlanned ? clothRec.clothingPlanned : null;
     p.test = withTest ? withTest.test : null;
     p.clothingSize = (p.records.find((r) => r.clothingSize) || {}).clothingSize || "";
     p.email = (p.records.find((r) => r.email) || {}).email || "";
@@ -871,6 +921,31 @@ app.post("/api/integrace/nastup", requireAuth, async (req, res) => {
     });
     broadcast(req.header("x-client-id"), "lide");
     res.status(201).json({ zaznam: rec });
+  } catch (e) { writeError(res, e); }
+});
+
+/* „Oblečení předáno" z karty člověka: zapíše předávku do Podpisů, kurýrovi se
+   na odkazu odemkne podpis převzetí. Ze skladu se odečte až po jeho podpisu.
+   Smí admin a kdo smí zakládat kurýry v městě záznamu. */
+app.post("/api/integrace/obleceni/:recordId", requireAuth, async (req, res) => {
+  const mine = courierCities(req.user);
+  if (!isAdmin(req.user) && !mine.size) return res.status(403).json({ error: "forbidden" });
+  const items = {};
+  for (const it of INV_ITEMS) {
+    const v = (req.body && req.body.items && req.body.items[it.id]) || {};
+    const count = parseInt(v.count, 10) || 0;
+    if (count > 0) items[it.id] = { count, size: String(v.size || "").toUpperCase() };
+  }
+  try {
+    if (!isAdmin(req.user)) {
+      const recs = await upstream("podpisy", "/kuryri");
+      const rec = recs.find((r) => r.id === req.params.recordId);
+      if (!rec || !(rec.cities || []).some((c) => mine.has(c))) return res.status(403).json({ error: "forbidden", message: "K tomuto kurýrovi nemáte přístup." });
+    }
+    const rec = await upstreamWrite("podpisy", "POST", "/r/" + encodeURIComponent(req.params.recordId) + "/obleceni", { items, by: req.user.name });
+    broadcast(req.header("x-client-id"), "lide");
+    syncPodpisyClothing();
+    res.json({ zaznam: rec });
   } catch (e) { writeError(res, e); }
 });
 
@@ -1415,6 +1490,31 @@ app.post("/api/inventory/move", requireAuth, requireAdmin, (req, res) => {
   respond(req, res);
 });
 
+// Inventura: zadaný skutečný stav skladu { counts: { "tricko|L": 12, … } }.
+// Rozdíl proti evidenci se zapíše jako opravný pohyb, takže historie zůstane.
+app.post("/api/inventory/stocktake", requireAuth, requireAdmin, (req, res) => {
+  const counts = (req.body && req.body.counts) || {};
+  const { stock } = inventorySummary();
+  const ts = Date.now();
+  let moves = 0;
+  for (const [k, raw] of Object.entries(counts)) {
+    const [item, size] = String(k).split("|");
+    if (!invItem(item) || !INV_SIZES.includes(size)) return res.status(400).json({ error: "Neznámá položka nebo velikost: " + k });
+    if (raw === "" || raw == null) continue;
+    const want = parseInt(raw, 10);
+    if (!Number.isInteger(want) || want < 0 || want > 99999) return res.status(400).json({ error: "Neplatný počet u " + k });
+    const diff = want - (stock[k] || 0);
+    if (!diff) continue;
+    DOC.inventory.ledger.push({
+      id: uid(), ts, item, size, qty: Math.abs(diff), dir: diff > 0 ? "in" : "out", counted: true,
+      personKey: null, personName: null, source: "stocktake", note: String(req.body.note || "Inventura").slice(0, 200), by: req.user.id,
+    });
+    moves++;
+  }
+  broadcast(req.header("x-client-id")); persist();
+  res.json(Object.assign({ stocktake: { moves } }, filterStateFor(req.user)));
+});
+
 // Smazání jednoho pohybu (oprava chyby).
 app.delete("/api/inventory/move/:id", requireAuth, requireAdmin, (req, res) => {
   const before = DOC.inventory.ledger.length;
@@ -1459,4 +1559,7 @@ app.get("*", (req, res) => res.sendFile(path.join(__dirname, "public", "index.ht
 
 loadDoc().then(() => {
   app.listen(PORT, () => console.log(`Trellite Pro běží na portu ${PORT}`));
+  // Oblečení z Podpisů: podepsaná převzetí se odečtou ze skladu i bez otevření Trella.
+  syncPodpisyClothing();
+  setInterval(syncPodpisyClothing, 3 * 60e3);
 }).catch((e) => { console.error("Start selhal:", e); process.exit(1); });
